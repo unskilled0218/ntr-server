@@ -29,12 +29,53 @@
             Due
             <input id="add-due" type="date" aria-label="Due date" />
           </label>
-          <label class="add-tags-field">
-            Projects &amp; contexts
-            <select id="add-tags" multiple aria-label="Projects and contexts"></select>
-          </label>
+          <div class="dropdown" data-kind="project">
+            <span class="field-label">Projects</span>
+            <button
+              type="button"
+              class="dropdown-toggle"
+              aria-haspopup="true"
+              aria-expanded="false"
+            >
+              Select projects
+            </button>
+            <div class="dropdown-panel" hidden>
+              <div class="dropdown-options"></div>
+              <button type="button" class="dropdown-add">+ Add project</button>
+            </div>
+          </div>
+          <div class="dropdown" data-kind="context">
+            <span class="field-label">Contexts</span>
+            <button
+              type="button"
+              class="dropdown-toggle"
+              aria-haspopup="true"
+              aria-expanded="false"
+            >
+              Select contexts
+            </button>
+            <div class="dropdown-panel" hidden>
+              <div class="dropdown-options"></div>
+              <button type="button" class="dropdown-add">+ Add context</button>
+            </div>
+          </div>
         </div>
       </form>
+
+      <dialog id="label-modal">
+        <form id="label-form">
+          <h2 id="label-modal-title">Add project</h2>
+          <label>
+            Name
+            <input id="label-input" type="text" autocomplete="off" />
+          </label>
+          <p id="label-error" class="modal-error" role="alert" hidden></p>
+          <div class="modal-actions">
+            <button type="button" id="label-cancel">Cancel</button>
+            <button type="submit">Add</button>
+          </div>
+        </form>
+      </dialog>
 
       <div id="filters">
         <button data-filter="all" class="active">All</button>

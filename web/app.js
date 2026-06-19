@@ -1,8 +1,24 @@
 "use strict";
 
+// Everything that differs between the two label kinds lives here, so prefixes
+// and user-facing words are defined once instead of being scattered across the
+// markup and the compose/render logic.
+const KINDS = {
+  project: { prefix: "+", singular: "project", plural: "Projects" },
+  context: { prefix: "@", singular: "context", plural: "Contexts" },
+};
+
 const state = {
   filter: "all", // all | active | completed
   tag: "",
+};
+
+// Per-kind label sets. `known` is what the dropdown offers (server-derived plus
+// staged), `selected` is the current pick, `staged` is labels created via the
+// modal that no task uses yet (see loadLabels).
+const labels = {
+  project: { known: new Set(), selected: new Set(), staged: new Set() },
+  context: { known: new Set(), selected: new Set(), staged: new Set() },
 };
 
 const els = {
@@ -10,13 +26,21 @@ const els = {
   input: document.getElementById("add-input"),
   priority: document.getElementById("add-priority"),
   due: document.getElementById("add-due"),
-  tags: document.getElementById("add-tags"),
   list: document.getElementById("tasks"),
   empty: document.getElementById("empty"),
   error: document.getElementById("error"),
   tagFilter: document.getElementById("tag-filter"),
   filterButtons: Array.from(document.querySelectorAll("#filters button[data-filter]")),
+  modal: document.getElementById("label-modal"),
+  modalForm: document.getElementById("label-form"),
+  modalTitle: document.getElementById("label-modal-title"),
+  modalInput: document.getElementById("label-input"),
+  modalError: document.getElementById("label-error"),
+  modalCancel: document.getElementById("label-cancel"),
 };
+
+// Filled by initDropdowns(): kind -> { render } controller.
+const dropdowns = {};
 
 function showError(message) {
   els.error.textContent = message;
@@ -154,54 +178,159 @@ async function editTask(task) {
   try {
     await api("PUT", `/api/tasks/${task.id}`, { text });
     await refresh();
-    await loadTagOptions();
+    await loadLabels();
   } catch (err) {
     showError(err.message);
   }
 }
 
-// Populate the priority select once: a blank placeholder, then A..Z.
+// Populate the priority select once: a blank placeholder, then A..C. Only A-C
+// are offered in the picker by product decision; the server still accepts and
+// displays any (A)..(Z) priority on tasks created or edited as raw todo.txt.
 function initPriorityOptions() {
-  const placeholder = new Option("Priority", "");
-  els.priority.add(placeholder);
+  els.priority.add(new Option("Priority", ""));
   const first = "A".charCodeAt(0);
-  const last = "Z".charCodeAt(0);
+  const last = "C".charCodeAt(0);
   for (let code = first; code <= last; code += 1) {
     const letter = String.fromCharCode(code);
     els.priority.add(new Option(letter, letter));
   }
 }
 
-// Rebuild the projects/contexts select from the labels currently in the store,
-// preserving any still-valid selection. Suggestions are best-effort: a failure
-// here leaves the form usable, it just offers no options.
-async function loadTagOptions() {
-  let tokens;
-  try {
-    const tasks = await api("GET", "/api/tasks");
-    const set = new Set();
-    for (const task of tasks) {
-      for (const p of task.projects) set.add(`+${p}`);
-      for (const c of task.contexts) set.add(`@${c}`);
-    }
-    tokens = Array.from(set).sort();
-  } catch (err) {
-    showError(`Could not load tag suggestions: ${err.message}`);
-    return;
+// Wire one project/context dropdown: a toggle button revealing a panel of
+// checkbox rows plus an "Add" button. Returns a controller exposing render().
+function setupDropdown(kind, root) {
+  const meta = KINDS[kind];
+  const toggle = root.querySelector(".dropdown-toggle");
+  const panel = root.querySelector(".dropdown-panel");
+  const options = root.querySelector(".dropdown-options");
+  const addBtn = root.querySelector(".dropdown-add");
+  const selected = labels[kind].selected;
+
+  function refreshToggle() {
+    toggle.textContent = selected.size
+      ? `${meta.plural} (${selected.size})`
+      : `Select ${meta.plural.toLowerCase()}`;
   }
-  const selected = new Set(selectedTagTokens());
-  els.tags.replaceChildren(
-    ...tokens.map((tok) => {
-      const opt = new Option(tok, tok);
-      opt.selected = selected.has(tok);
-      return opt;
-    }),
-  );
+
+  function render() {
+    const rows = Array.from(labels[kind].known)
+      .sort()
+      .map((name) => {
+        const row = document.createElement("label");
+        row.className = "dropdown-option";
+        const box = document.createElement("input");
+        box.type = "checkbox";
+        box.checked = selected.has(name);
+        box.addEventListener("change", () => {
+          if (box.checked) selected.add(name);
+          else selected.delete(name);
+          refreshToggle();
+        });
+        row.appendChild(box);
+        row.appendChild(document.createTextNode(name));
+        return row;
+      });
+    options.replaceChildren(...rows);
+    refreshToggle();
+  }
+
+  function setOpen(open) {
+    panel.hidden = !open;
+    toggle.setAttribute("aria-expanded", String(open));
+  }
+
+  toggle.addEventListener("click", () => {
+    const willOpen = panel.hidden;
+    closeAllDropdowns();
+    if (willOpen) setOpen(true);
+  });
+  addBtn.addEventListener("click", () => openLabelModal(kind));
+
+  render();
+  return { render, setOpen };
 }
 
-// Selected option values from the projects/contexts select.
-function selectedTagTokens() {
-  return Array.from(els.tags.selectedOptions, (opt) => opt.value);
+function closeAllDropdowns() {
+  for (const kind of Object.keys(dropdowns)) dropdowns[kind].setOpen(false);
+}
+
+function initDropdowns() {
+  for (const root of document.querySelectorAll(".dropdown")) {
+    const kind = root.dataset.kind;
+    dropdowns[kind] = setupDropdown(kind, root);
+  }
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest(".dropdown")) closeAllDropdowns();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !els.modal.open) closeAllDropdowns();
+  });
+}
+
+// --- Add-label modal (shared between both kinds) ---
+
+let modalKind = null;
+
+function openLabelModal(kind) {
+  modalKind = kind;
+  els.modalTitle.textContent = `Add ${KINDS[kind].singular}`;
+  els.modalInput.value = "";
+  els.modalError.hidden = true;
+  els.modalError.textContent = "";
+  els.modal.showModal();
+  els.modalInput.focus();
+}
+
+// Normalize and validate a typed label. Returns { name } on success or
+// { error } describing why it was rejected. A leading +/@ the user types is
+// stripped; todo.txt labels are single whitespace-free tokens.
+function parseLabelInput(raw) {
+  const name = raw.trim().replace(/^[+@]/, "");
+  if (!name) return { error: "Name is required." };
+  if (/\s/.test(name)) return { error: "No spaces allowed in a project or context." };
+  return { name };
+}
+
+function confirmLabel() {
+  const kind = modalKind;
+  const { name, error } = parseLabelInput(els.modalInput.value);
+  if (error) {
+    els.modalError.textContent = error;
+    els.modalError.hidden = false;
+    return;
+  }
+  labels[kind].staged.add(name);
+  labels[kind].known.add(name);
+  labels[kind].selected.add(name);
+  dropdowns[kind].render();
+  els.modal.close();
+}
+
+// Rebuild each kind's known set from the labels currently in the store, merging
+// in any staged labels, and re-render the dropdowns. Selections that no longer
+// exist are dropped. Suggestions are best-effort: a failure here leaves the
+// form usable, it just offers no server-derived options.
+async function loadLabels() {
+  let server;
+  try {
+    const tasks = await api("GET", "/api/tasks");
+    server = { project: new Set(), context: new Set() };
+    for (const task of tasks) {
+      for (const p of task.projects) server.project.add(p);
+      for (const c of task.contexts) server.context.add(c);
+    }
+  } catch (err) {
+    showError(`Could not load label suggestions: ${err.message}`);
+    return;
+  }
+  for (const kind of Object.keys(KINDS)) {
+    const known = new Set([...server[kind], ...labels[kind].staged]);
+    labels[kind].known = known;
+    for (const name of [...labels[kind].selected])
+      if (!known.has(name)) labels[kind].selected.delete(name);
+    dropdowns[kind].render();
+  }
 }
 
 // Build a todo.txt line from the form controls. Pure: reads values, returns a
@@ -211,7 +340,8 @@ function composeText() {
   if (els.priority.value) parts.push(`(${els.priority.value})`);
   const desc = els.input.value.trim();
   if (desc) parts.push(desc);
-  for (const tok of selectedTagTokens()) parts.push(tok);
+  for (const kind of Object.keys(KINDS))
+    for (const name of labels[kind].selected) parts.push(`${KINDS[kind].prefix}${name}`);
   if (els.due.value) parts.push(`due:${els.due.value}`);
   return parts.join(" ").trim();
 }
@@ -220,7 +350,10 @@ function resetAddForm() {
   els.input.value = "";
   els.priority.value = "";
   els.due.value = "";
-  for (const opt of els.tags.options) opt.selected = false;
+  for (const kind of Object.keys(KINDS)) {
+    labels[kind].selected.clear();
+    dropdowns[kind].render();
+  }
 }
 
 els.form.addEventListener("submit", async (e) => {
@@ -232,11 +365,17 @@ els.form.addEventListener("submit", async (e) => {
     await api("POST", "/api/tasks", { text });
     resetAddForm();
     await refresh();
-    await loadTagOptions();
+    await loadLabels();
   } catch (err) {
     showError(err.message);
   }
 });
+
+els.modalForm.addEventListener("submit", (e) => {
+  e.preventDefault();
+  confirmLabel();
+});
+els.modalCancel.addEventListener("click", () => els.modal.close());
 
 els.filterButtons.forEach((btn) => {
   btn.addEventListener("click", () => {
@@ -254,5 +393,6 @@ els.tagFilter.addEventListener("input", () => {
 });
 
 initPriorityOptions();
+initDropdowns();
 refresh();
-loadTagOptions();
+loadLabels();

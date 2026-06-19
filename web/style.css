@@ -65,13 +65,74 @@ form#add-form {
   color: var(--fg);
 }
 
-.add-tags-field {
-  flex: 1;
-  min-width: 12rem;
+/* Custom multi-select dropdown (projects / contexts) */
+.dropdown {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 10rem;
 }
 
-.add-tags-field select {
-  min-height: 4.5rem;
+.dropdown .field-label {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.dropdown-toggle {
+  text-align: left;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.4rem 0.5rem;
+}
+
+.dropdown-panel {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 10;
+  margin-top: 0.2rem;
+  min-width: 100%;
+  max-height: 14rem;
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+}
+
+.dropdown-options {
+  display: flex;
+  flex-direction: column;
+}
+
+.dropdown-option {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.6rem;
+  font-size: 0.9rem;
+  color: var(--fg);
+  cursor: pointer;
+}
+
+.dropdown-option:hover {
+  background: var(--bg);
+}
+
+.dropdown-add {
+  width: 100%;
+  border: none;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+  text-align: left;
+  color: var(--accent);
+  background: #fff;
+}
+
+.dropdown-add:hover {
+  background: var(--bg);
 }
 
 input[type="text"] {
@@ -173,4 +234,59 @@ li.task.completed .text {
 
 #empty {
   color: var(--muted);
+}
+
+/* Add-label modal */
+dialog#label-modal {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1.25rem;
+  max-width: 22rem;
+  width: 90%;
+  color: var(--fg);
+}
+
+dialog#label-modal::backdrop {
+  background: rgba(0, 0, 0, 0.35);
+}
+
+#label-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+#label-form h2 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+#label-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+#label-input {
+  width: 100%;
+}
+
+.modal-error {
+  margin: 0;
+  font-size: 0.85rem;
+  color: #b91c1c;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.modal-actions button[type="submit"] {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
 }
