@@ -1,3 +1,79 @@
 # my-ntr-server
 
-A Rust todo server (no users) using the todo.txt format, with a WebUI and an HTTP API.
+A single-binary Rust todo server with no user/auth concept. Tasks are stored in
+a plain [todo.txt](https://github.com/todotxt/todo.txt) file (the canonical
+store), exposed over a JSON HTTP API for use by other programs, and served
+through a small self-contained WebUI.
+
+## Run
+
+```sh
+cargo run
+# then open http://127.0.0.1:8080
+```
+
+Configuration (environment variables):
+
+| Variable                 | Default       | Meaning                                            |
+| ------------------------ | ------------- | -------------------------------------------------- |
+| `TODO_FILE`              | `todo.txt`    | Path to the todo.txt file.                         |
+| `HOST`                   | `127.0.0.1`   | Bind address.                                      |
+| `PORT`                   | `8080`        | Bind port.                                         |
+| `TODO_ADD_CREATION_DATE` | `true`        | Stamp a creation date on new incomplete tasks.     |
+
+> Security: there is no authentication by design. Keep the default loopback
+> bind, or put it behind an authenticating reverse proxy before exposing it.
+
+## API
+
+All task responses use this JSON shape:
+
+```json
+{
+  "id": 1,
+  "completed": false,
+  "priority": "A",
+  "completion_date": null,
+  "creation_date": "2026-06-19",
+  "description": "buy milk +groceries @store due:2026-06-30",
+  "projects": ["groceries"],
+  "contexts": ["store"],
+  "tags": { "due": "2026-06-30" },
+  "raw": "(A) 2026-06-19 buy milk +groceries @store due:2026-06-30"
+}
+```
+
+| Method & path                    | Description                                       |
+| -------------------------------- | ------------------------------------------------- |
+| `GET /api/health`                | Liveness check.                                   |
+| `GET /api/tasks`                 | List tasks. Filters: `completed`, `priority`, `project`, `context`. |
+| `POST /api/tasks`                | Create from `{ "text": "<todo.txt line>" }`.      |
+| `GET /api/tasks/{id}`            | Fetch one task.                                   |
+| `PUT /api/tasks/{id}`            | Replace from `{ "text": "<todo.txt line>" }`.     |
+| `POST /api/tasks/{id}/complete`  | Mark complete.                                     |
+| `POST /api/tasks/{id}/uncomplete`| Mark incomplete.                                  |
+| `DELETE /api/tasks/{id}`         | Delete (204 on success).                          |
+| `GET /api/raw`                   | Whole file as `text/plain`.                       |
+| `PUT /api/raw`                   | Replace the whole file from a `text/plain` body.  |
+
+### Task ids
+
+Ids are assigned at load time and are stable for the lifetime of the running
+process: deleting a task does not renumber the others, and a deleted id returns
+404 rather than silently aliasing another task. Ids are not written into the
+todo.txt file (it stays portable to other todo.txt tools) and are reassigned on
+restart or on a `PUT /api/raw` bulk replace.
+
+## todo.txt support
+
+Priorities `(A)`–`(Z)`, completion (`x`), completion/creation dates,
+`+projects`, `@contexts`, and `key:value` tags. When a task is completed its
+priority is preserved as a `pri:X` tag and restored on un-completion.
+
+## Development
+
+```sh
+cargo test     # unit + integration tests
+cargo fmt      # 2-space indent (see rustfmt.toml)
+cargo clippy --all-targets
+```
