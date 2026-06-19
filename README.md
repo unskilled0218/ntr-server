@@ -73,18 +73,20 @@ priority is preserved as a `pri:X` tag and restored on un-completion.
 ## WebUI
 
 The page at `/` lists, filters, and edits tasks. The add form has a free-text
-description plus structured controls beneath it — a priority dropdown (`A`–`C`),
-a due-date picker (written as a `due:` tag), and separate multi-select dropdowns
-for `+project` and `@context` labels — so common fields can be set by picking
-options instead of typing todo.txt syntax. Each label dropdown carries an "Add"
-button that opens a modal for creating a new project or context; a newly added
-label is selectable immediately and persists once a task using it is saved
-(todo.txt has no separate label store). The dropdowns are empty until the file
-contains at least one project or context.
+description plus four native dropdown/picker controls beneath it, all styled
+alike — a priority dropdown (`A`–`C`), a due-date picker (written as a `due:`
+tag), and single-select `+project` and `@context` dropdowns — so common fields
+can be set by picking options instead of typing todo.txt syntax. The project and
+context dropdowns are populated from the labels already present in the file (a
+new label appears as an option once a task using it is saved; todo.txt has no
+separate label store), and each is empty until the file contains at least one
+label of that kind.
 
-The `A`–`C` limit applies only to the picker: tasks created or edited as raw
-todo.txt (via the edit prompt or `PUT /api/raw`) may carry any `(A)`–`(Z)`
-priority, and it is displayed as-is.
+Two picker limits are UI-only and do not restrict the data model. The priority
+picker offers `A`–`C`, and the project/context dropdowns set at most one label
+each. Tasks created or edited as raw todo.txt (via the edit prompt or
+`PUT /api/raw`) may carry any `(A)`–`(Z)` priority and any number of `+projects`
+or `@contexts`; all of them are parsed, round-tripped, and displayed as-is.
 
 ## Development
 

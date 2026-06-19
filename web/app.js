@@ -1,11 +1,12 @@
 "use strict";
 
-// Everything that differs between the two label kinds lives here, so prefixes
-// and user-facing words are defined once instead of being scattered across the
-// markup and the compose/render logic.
+// Everything that differs between the two label kinds lives here, so the prefix
+// and user-facing word are defined once instead of being scattered across the
+// markup and the compose/populate logic. The select itself holds its options and
+// current value, so no separate per-kind selection state is needed.
 const KINDS = {
-  project: { prefix: "+", singular: "project", plural: "Projects" },
-  context: { prefix: "@", singular: "context", plural: "Contexts" },
+  project: { prefix: "+", plural: "Projects" },
+  context: { prefix: "@", plural: "Contexts" },
 };
 
 const state = {
@@ -13,34 +14,21 @@ const state = {
   tag: "",
 };
 
-// Per-kind label sets. `known` is what the dropdown offers (server-derived plus
-// staged), `selected` is the current pick, `staged` is labels created via the
-// modal that no task uses yet (see loadLabels).
-const labels = {
-  project: { known: new Set(), selected: new Set(), staged: new Set() },
-  context: { known: new Set(), selected: new Set(), staged: new Set() },
-};
-
 const els = {
   form: document.getElementById("add-form"),
   input: document.getElementById("add-input"),
   priority: document.getElementById("add-priority"),
   due: document.getElementById("add-due"),
+  // Label selects keyed by kind name so the compose/reset/load loops can read
+  // els[kind] without a per-kind branch.
+  project: document.getElementById("add-project"),
+  context: document.getElementById("add-context"),
   list: document.getElementById("tasks"),
   empty: document.getElementById("empty"),
   error: document.getElementById("error"),
   tagFilter: document.getElementById("tag-filter"),
   filterButtons: Array.from(document.querySelectorAll("#filters button[data-filter]")),
-  modal: document.getElementById("label-modal"),
-  modalForm: document.getElementById("label-form"),
-  modalTitle: document.getElementById("label-modal-title"),
-  modalInput: document.getElementById("label-input"),
-  modalError: document.getElementById("label-error"),
-  modalCancel: document.getElementById("label-cancel"),
 };
-
-// Filled by initDropdowns(): kind -> { render } controller.
-const dropdowns = {};
 
 function showError(message) {
   els.error.textContent = message;
@@ -197,122 +185,23 @@ function initPriorityOptions() {
   }
 }
 
-// Wire one project/context dropdown: a toggle button revealing a panel of
-// checkbox rows plus an "Add" button. Returns a controller exposing render().
-function setupDropdown(kind, root) {
-  const meta = KINDS[kind];
-  const toggle = root.querySelector(".dropdown-toggle");
-  const panel = root.querySelector(".dropdown-panel");
-  const options = root.querySelector(".dropdown-options");
-  const addBtn = root.querySelector(".dropdown-add");
-  const selected = labels[kind].selected;
-
-  function refreshToggle() {
-    toggle.textContent = selected.size
-      ? `${meta.plural} (${selected.size})`
-      : `Select ${meta.plural.toLowerCase()}`;
-  }
-
-  function render() {
-    const rows = Array.from(labels[kind].known)
-      .sort()
-      .map((name) => {
-        const row = document.createElement("label");
-        row.className = "dropdown-option";
-        const box = document.createElement("input");
-        box.type = "checkbox";
-        box.checked = selected.has(name);
-        box.addEventListener("change", () => {
-          if (box.checked) selected.add(name);
-          else selected.delete(name);
-          refreshToggle();
-        });
-        row.appendChild(box);
-        row.appendChild(document.createTextNode(name));
-        return row;
-      });
-    options.replaceChildren(...rows);
-    refreshToggle();
-  }
-
-  function setOpen(open) {
-    panel.hidden = !open;
-    toggle.setAttribute("aria-expanded", String(open));
-  }
-
-  toggle.addEventListener("click", () => {
-    const willOpen = panel.hidden;
-    closeAllDropdowns();
-    if (willOpen) setOpen(true);
-  });
-  addBtn.addEventListener("click", () => openLabelModal(kind));
-
-  render();
-  return { render, setOpen };
+// Rebuild one label select's option list: a blank placeholder (text = the field
+// caption, mirroring the Priority select) followed by the sorted label names.
+// The current pick is preserved across reloads only while it still exists,
+// otherwise it falls back to the placeholder.
+function populateLabelSelect(kind, names) {
+  const select = els[kind];
+  const previous = select.value;
+  select.replaceChildren();
+  select.add(new Option(KINDS[kind].plural, ""));
+  for (const name of [...names].sort()) select.add(new Option(name, name));
+  select.value = names.has(previous) ? previous : "";
 }
 
-function closeAllDropdowns() {
-  for (const kind of Object.keys(dropdowns)) dropdowns[kind].setOpen(false);
-}
-
-function initDropdowns() {
-  for (const root of document.querySelectorAll(".dropdown")) {
-    const kind = root.dataset.kind;
-    dropdowns[kind] = setupDropdown(kind, root);
-  }
-  document.addEventListener("click", (e) => {
-    if (!e.target.closest(".dropdown")) closeAllDropdowns();
-  });
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && !els.modal.open) closeAllDropdowns();
-  });
-}
-
-// --- Add-label modal (shared between both kinds) ---
-
-let modalKind = null;
-
-function openLabelModal(kind) {
-  modalKind = kind;
-  els.modalTitle.textContent = `Add ${KINDS[kind].singular}`;
-  els.modalInput.value = "";
-  els.modalError.hidden = true;
-  els.modalError.textContent = "";
-  els.modal.showModal();
-  els.modalInput.focus();
-}
-
-// Normalize and validate a typed label. Returns { name } on success or
-// { error } describing why it was rejected. Leading +/@ sigils the user types
-// are stripped; todo.txt labels are single tokens with no whitespace and no
-// +, @, or : (a bare key:value would compose into a tag, not a label).
-function parseLabelInput(raw) {
-  const name = raw.trim().replace(/^[+@]+/, "");
-  if (!name) return { error: "Name is required." };
-  if (/\s/.test(name)) return { error: "No spaces allowed in a project or context." };
-  if (/[+@:]/.test(name)) return { error: "A project or context cannot contain + @ or :." };
-  return { name };
-}
-
-function confirmLabel() {
-  const kind = modalKind;
-  const { name, error } = parseLabelInput(els.modalInput.value);
-  if (error) {
-    els.modalError.textContent = error;
-    els.modalError.hidden = false;
-    return;
-  }
-  labels[kind].staged.add(name);
-  labels[kind].known.add(name);
-  labels[kind].selected.add(name);
-  dropdowns[kind].render();
-  els.modal.close();
-}
-
-// Rebuild each kind's known set from the labels currently in the store, merging
-// in any staged labels, and re-render the dropdowns. Selections that no longer
-// exist are dropped. Suggestions are best-effort: a failure here leaves the
-// form usable, it just offers no server-derived options.
+// Refresh both label selects from the labels currently in the store. Options are
+// best-effort: a failure here leaves the form usable, the selects just keep their
+// current options. A select stays empty (placeholder only) until the file holds
+// at least one label of that kind.
 async function loadLabels() {
   let server;
   try {
@@ -326,24 +215,19 @@ async function loadLabels() {
     showError(`Could not load label suggestions: ${err.message}`);
     return;
   }
-  for (const kind of Object.keys(KINDS)) {
-    const known = new Set([...server[kind], ...labels[kind].staged]);
-    labels[kind].known = known;
-    for (const name of [...labels[kind].selected])
-      if (!known.has(name)) labels[kind].selected.delete(name);
-    dropdowns[kind].render();
-  }
+  for (const kind of Object.keys(KINDS)) populateLabelSelect(kind, server[kind]);
 }
 
 // Build a todo.txt line from the form controls. Pure: reads values, returns a
-// string. Priority must lead the line; the rest of the order is cosmetic.
+// string. Priority must lead the line; the rest of the order is cosmetic. Each
+// label select contributes at most one label (picker-only single-select).
 function composeText() {
   const parts = [];
   if (els.priority.value) parts.push(`(${els.priority.value})`);
   const desc = els.input.value.trim();
   if (desc) parts.push(desc);
   for (const kind of Object.keys(KINDS))
-    for (const name of labels[kind].selected) parts.push(`${KINDS[kind].prefix}${name}`);
+    if (els[kind].value) parts.push(`${KINDS[kind].prefix}${els[kind].value}`);
   if (els.due.value) parts.push(`due:${els.due.value}`);
   return parts.join(" ").trim();
 }
@@ -352,10 +236,7 @@ function resetAddForm() {
   els.input.value = "";
   els.priority.value = "";
   els.due.value = "";
-  for (const kind of Object.keys(KINDS)) {
-    labels[kind].selected.clear();
-    dropdowns[kind].render();
-  }
+  for (const kind of Object.keys(KINDS)) els[kind].value = "";
 }
 
 els.form.addEventListener("submit", async (e) => {
@@ -373,12 +254,6 @@ els.form.addEventListener("submit", async (e) => {
   }
 });
 
-els.modalForm.addEventListener("submit", (e) => {
-  e.preventDefault();
-  confirmLabel();
-});
-els.modalCancel.addEventListener("click", () => els.modal.close());
-
 els.filterButtons.forEach((btn) => {
   btn.addEventListener("click", () => {
     state.filter = btn.dataset.filter;
@@ -395,6 +270,5 @@ els.tagFilter.addEventListener("input", () => {
 });
 
 initPriorityOptions();
-initDropdowns();
 refresh();
 loadLabels();
