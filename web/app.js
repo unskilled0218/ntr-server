@@ -283,12 +283,14 @@ function openLabelModal(kind) {
 }
 
 // Normalize and validate a typed label. Returns { name } on success or
-// { error } describing why it was rejected. A leading +/@ the user types is
-// stripped; todo.txt labels are single whitespace-free tokens.
+// { error } describing why it was rejected. Leading +/@ sigils the user types
+// are stripped; todo.txt labels are single tokens with no whitespace and no
+// +, @, or : (a bare key:value would compose into a tag, not a label).
 function parseLabelInput(raw) {
-  const name = raw.trim().replace(/^[+@]/, "");
+  const name = raw.trim().replace(/^[+@]+/, "");
   if (!name) return { error: "Name is required." };
   if (/\s/.test(name)) return { error: "No spaces allowed in a project or context." };
+  if (/[+@:]/.test(name)) return { error: "A project or context cannot contain + @ or :." };
   return { name };
 }
 
