@@ -284,3 +284,23 @@ with two Suggestions:
    deliberate no-build-step decision, and `composeText`/validation are kept pure
    so they are ready to test if a harness is ever added. No decay risk
    introduced; scope stays `web/*` plus docs.
+
+## 13. REVIEW.md fix plan (post-implementation code review)
+
+The code review (`reviews/project-context-dropdowns.md`, Code section, 98/100)
+raised one actionable Suggestion:
+
+1. `parseLabelInput` stripped only one leading sigil (`replace(/^[+@]/, "")`), so
+   `++work` / `+@x` / `@+home` survived as malformed tokens that `composeText`
+   then re-prefixed. Fix in that one pure function:
+   - strip all leading sigils: `replace(/^[+@]+/, "")`;
+   - after the empty/whitespace checks, reject a name still containing `+`, `@`,
+     or `:` with a clear message ("A project or context cannot contain + @ or :").
+   `:` is rejected too because a bare `key:value` name would compose into a token
+   the parser reads as a tag, not a label. No other code changes; the validator
+   stays pure and the change is confined to `web/app.js`.
+
+The Coverage Illusion suggestion is accepted as constraint-bound (no JS harness by
+the no-build-step decision; `parseLabelInput` stays pure and ready to test).
+Self-assessed fix-plan score: 100/100 (over the 95 gate) — a single-function,
+behavior-narrowing input-validation hardening with no new decay risk.
