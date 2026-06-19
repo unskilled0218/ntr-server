@@ -31,8 +31,47 @@ h1 {
 
 form#add-form {
   display: flex;
+  flex-direction: column;
   gap: 0.5rem;
   margin-bottom: 1rem;
+}
+
+.add-row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.add-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.add-fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.add-fields select,
+.add-fields input[type="date"] {
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font: inherit;
+  background: #fff;
+  color: var(--fg);
+}
+
+.add-tags-field {
+  flex: 1;
+  min-width: 12rem;
+}
+
+.add-tags-field select {
+  min-height: 4.5rem;
 }
 
 input[type="text"] {
