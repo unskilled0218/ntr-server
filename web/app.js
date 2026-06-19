@@ -8,6 +8,9 @@ const state = {
 const els = {
   form: document.getElementById("add-form"),
   input: document.getElementById("add-input"),
+  priority: document.getElementById("add-priority"),
+  due: document.getElementById("add-due"),
+  tags: document.getElementById("add-tags"),
   list: document.getElementById("tasks"),
   empty: document.getElementById("empty"),
   error: document.getElementById("error"),
@@ -151,19 +154,83 @@ async function editTask(task) {
   try {
     await api("PUT", `/api/tasks/${task.id}`, { text });
     await refresh();
+    await loadTagOptions();
   } catch (err) {
     showError(err.message);
   }
 }
 
+// Populate the priority select once: a blank placeholder, then A..Z.
+function initPriorityOptions() {
+  const placeholder = new Option("Priority", "");
+  els.priority.add(placeholder);
+  for (let code = 65; code <= 90; code += 1) {
+    const letter = String.fromCharCode(code);
+    els.priority.add(new Option(letter, letter));
+  }
+}
+
+// Rebuild the projects/contexts select from the labels currently in the store,
+// preserving any still-valid selection. Suggestions are best-effort: a failure
+// here leaves the form usable, it just offers no options.
+async function loadTagOptions() {
+  let tokens;
+  try {
+    const tasks = await api("GET", "/api/tasks");
+    const set = new Set();
+    for (const task of tasks) {
+      for (const p of task.projects) set.add(`+${p}`);
+      for (const c of task.contexts) set.add(`@${c}`);
+    }
+    tokens = Array.from(set).sort();
+  } catch (err) {
+    showError(`Could not load tag suggestions: ${err.message}`);
+    return;
+  }
+  const selected = new Set(selectedTagTokens());
+  els.tags.replaceChildren(
+    ...tokens.map((tok) => {
+      const opt = new Option(tok, tok);
+      opt.selected = selected.has(tok);
+      return opt;
+    }),
+  );
+}
+
+// Selected option values from the projects/contexts select.
+function selectedTagTokens() {
+  return Array.from(els.tags.selectedOptions, (opt) => opt.value);
+}
+
+// Build a todo.txt line from the form controls. Pure: reads values, returns a
+// string. Priority must lead the line; the rest of the order is cosmetic.
+function composeText() {
+  const parts = [];
+  if (els.priority.value) parts.push(`(${els.priority.value})`);
+  const desc = els.input.value.trim();
+  if (desc) parts.push(desc);
+  for (const tok of selectedTagTokens()) parts.push(tok);
+  if (els.due.value) parts.push(`due:${els.due.value}`);
+  return parts.join(" ").trim();
+}
+
+function resetAddForm() {
+  els.input.value = "";
+  els.priority.value = "";
+  els.due.value = "";
+  for (const opt of els.tags.options) opt.selected = false;
+}
+
 els.form.addEventListener("submit", async (e) => {
   e.preventDefault();
-  const text = els.input.value.trim();
-  if (!text) return;
+  // A description is the one required field; without it an add is a no-op.
+  if (!els.input.value.trim()) return;
+  const text = composeText();
   try {
     await api("POST", "/api/tasks", { text });
-    els.input.value = "";
+    resetAddForm();
     await refresh();
+    await loadTagOptions();
   } catch (err) {
     showError(err.message);
   }
@@ -184,4 +251,6 @@ els.tagFilter.addEventListener("input", () => {
   tagTimer = setTimeout(refresh, 200);
 });
 
+initPriorityOptions();
 refresh();
+loadTagOptions();

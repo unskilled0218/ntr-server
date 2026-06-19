@@ -11,13 +11,29 @@
       <h1>todo</h1>
 
       <form id="add-form" autocomplete="off">
-        <input
-          id="add-input"
-          type="text"
-          placeholder="Add a task, e.g. (A) call bank +finance @phone due:2026-06-30"
-          aria-label="New task"
-        />
-        <button type="submit">Add</button>
+        <div class="add-row">
+          <input
+            id="add-input"
+            type="text"
+            placeholder="Add a task, e.g. call bank"
+            aria-label="New task"
+          />
+          <button type="submit">Add</button>
+        </div>
+        <div class="add-fields">
+          <label>
+            Priority
+            <select id="add-priority" aria-label="Priority"></select>
+          </label>
+          <label>
+            Due
+            <input id="add-due" type="date" aria-label="Due date" />
+          </label>
+          <label class="add-tags-field">
+            Projects &amp; contexts
+            <select id="add-tags" multiple aria-label="Projects and contexts"></select>
+          </label>
+        </div>
       </form>
 
       <div id="filters">
