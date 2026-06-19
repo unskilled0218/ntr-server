@@ -138,34 +138,28 @@ impl Store {
   pub fn update(&mut self, id: u64, text: &str) -> Result<(), StoreError> {
     let task =
       Task::parse(text).ok_or_else(|| StoreError::Invalid("task text is empty".to_string()))?;
-    let mut entries = self.entries.clone();
-    let entry = entries
-      .iter_mut()
-      .find(|e| e.id == id)
-      .ok_or(StoreError::NotFound)?;
-    entry.task = task;
-    self.save(entries, self.next_id)
+    self.mutate(id, move |t| *t = task)
   }
 
   /// Mark a task complete.
   pub fn complete(&mut self, id: u64, today: NaiveDate) -> Result<(), StoreError> {
-    let mut entries = self.entries.clone();
-    let entry = entries
-      .iter_mut()
-      .find(|e| e.id == id)
-      .ok_or(StoreError::NotFound)?;
-    entry.task.complete(today);
-    self.save(entries, self.next_id)
+    self.mutate(id, |t| t.complete(today))
   }
 
   /// Mark a task incomplete.
   pub fn uncomplete(&mut self, id: u64) -> Result<(), StoreError> {
+    self.mutate(id, |t| t.uncomplete())
+  }
+
+  /// Apply `f` to the task with `id` under the write-then-swap discipline:
+  /// mutate a clone, persist it, and only then swap it into memory.
+  fn mutate(&mut self, id: u64, f: impl FnOnce(&mut Task)) -> Result<(), StoreError> {
     let mut entries = self.entries.clone();
     let entry = entries
       .iter_mut()
       .find(|e| e.id == id)
       .ok_or(StoreError::NotFound)?;
-    entry.task.uncomplete();
+    f(&mut entry.task);
     self.save(entries, self.next_id)
   }
 
@@ -185,12 +179,7 @@ impl Store {
 
   /// The whole store rendered as todo.txt text.
   pub fn raw(&self) -> String {
-    let mut out = String::new();
-    for e in &self.entries {
-      out.push_str(&e.task.to_string());
-      out.push('\n');
-    }
-    out
+    render(&self.entries)
   }
 
   /// Replace the entire file from raw todo.txt text. All ids are reassigned
@@ -217,14 +206,20 @@ impl Store {
   }
 }
 
+/// Render entries as todo.txt text (one task per line, trailing newline each).
+fn render(entries: &[Entry]) -> String {
+  let mut out = String::new();
+  for e in entries {
+    out.push_str(&e.task.to_string());
+    out.push('\n');
+  }
+  out
+}
+
 /// Atomically write entries: write to a sibling temp file, then rename over the
 /// target so a crash never leaves a partially written todo.txt.
 fn write_file(path: &Path, entries: &[Entry]) -> io::Result<()> {
-  let mut data = String::new();
-  for e in entries {
-    data.push_str(&e.task.to_string());
-    data.push('\n');
-  }
+  let data = render(entries);
 
   let mut tmp = path.as_os_str().to_owned();
   tmp.push(".tmp");

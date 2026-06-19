@@ -233,3 +233,20 @@ system packages are required beyond the existing Rust toolchain (cargo 1.96).
 7. Integration tests `tests/api.rs`.
 8. `cargo fmt`, `cargo clippy`, `cargo test`; update README; write
    `implemented/new.md`; commit.
+
+## 13. REVIEW.md fix plan (post-implementation code review)
+
+The code review (`reviews/new.md`, Code section, 98/100) raised two localized
+`store.rs` duplications. Fixes:
+
+1. Extract `fn render(entries: &[Entry]) -> String` and call it from both
+   `Store::raw()` and `write_file()` (removes the duplicated render loop).
+2. Extract `fn mutate(&mut self, id, f: impl FnOnce(&mut Task)) -> Result<(),
+   StoreError>` and re-express `update`/`complete`/`uncomplete` through it
+   (removes the duplicated clone/find/save boilerplate). `update` still parses
+   first so an empty line yields `Invalid` before any lookup.
+
+Scope: `src/store.rs` only; pure internal refactor, no API or behavior change.
+Existing unit + integration tests are the regression guard. No new decay risks
+introduced (reduces duplication, dependencies unchanged). Self-assessed plan
+score: 100/100 (over the 95 gate) — cleared to implement.

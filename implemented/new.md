@@ -53,3 +53,17 @@ and an embedded WebUI.
 Note for the environment: `clippy` and `rustfmt` rustup components were added
 (`rustup component add clippy rustfmt`); no system packages were needed beyond
 the existing cargo 1.96 toolchain.
+
+## REVIEW.md follow-up (post-commit code review)
+
+`reviews/new.md` (Code section, 98/100) found two `store.rs` duplications; both
+fixed as an internal refactor (no behavior change), per the fix plan in
+`plans/new.md` section 13:
+
+- Extracted `render(entries) -> String`, now shared by `Store::raw()` and
+  `write_file()`.
+- Extracted `Store::mutate(id, f)`; `update`/`complete`/`uncomplete` now go
+  through it.
+
+Re-verified: `cargo test` 21 pass, `cargo clippy --all-targets` clean,
+`cargo fmt --check` clean.
