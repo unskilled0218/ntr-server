@@ -164,7 +164,9 @@ async function editTask(task) {
 function initPriorityOptions() {
   const placeholder = new Option("Priority", "");
   els.priority.add(placeholder);
-  for (let code = 65; code <= 90; code += 1) {
+  const first = "A".charCodeAt(0);
+  const last = "Z".charCodeAt(0);
+  for (let code = first; code <= last; code += 1) {
     const letter = String.fromCharCode(code);
     els.priority.add(new Option(letter, letter));
   }

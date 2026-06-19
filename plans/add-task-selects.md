@@ -190,3 +190,18 @@ No Rust source, no API surface, no `Cargo.toml` change.
 - A `<select multiple>` is a slightly clunky multi-pick control; it is the
   native, dependency-free way to honor "select options not text" and keeps the
   no-build-step constraint. Accepted for v1.
+
+## 11. REVIEW.md fix plan (post-implementation code review)
+
+The code review (`reviews/add-task-selects.md`, Code section, 98/100) raised one
+actionable Suggestion. Fix:
+
+1. `initPriorityOptions()` used raw ASCII literals `65`/`90` for the `A`..`Z`
+   loop bounds. Replace them with `"A".charCodeAt(0)` / `"Z".charCodeAt(0)` so
+   the range is self-documenting. Pure readability change, no behavior change.
+
+The Coverage Illusion suggestion (no automated test for the client compose
+logic) is accepted as constraint-bound: the repo has no JS test harness by the
+deliberate no-build-step decision, and `composeText` is already pure so it is
+ready to test if a harness is ever added. Scope: `web/app.js` only; no decay
+risk introduced. Self-assessed fix-plan score: 100/100 (over the 95 gate).
