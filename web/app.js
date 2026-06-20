@@ -576,13 +576,18 @@ function blockKind(line) {
   if (FENCE.test(line)) return "fence";
   if (HEADING.test(line)) return "heading";
   if (/^(---|\*\*\*|___)\s*$/.test(line)) return "hr";
-  if (QUOTE_MARKER.test(line) && line.startsWith(">")) return "quote";
+  if (QUOTE_MARKER.test(line)) return "quote"; // ^>-anchored, so this implies startsWith(">")
   if (LIST_ITEM.test(line)) return "list";
   return "para";
 }
 
 // A dimmed, kept marker (e.g. `#`, `**`, `>`); the one place marker spans are built.
 const mark = (s) => `<span class="md-mark">${s}</span>`;
+
+// A replace callback that wraps one emphasis run: the fixed marker re-emitted as dimmed
+// marks around a styled span, so textContent === the source run. The four bold/italic
+// branches of formatInline share this; the link branch keeps its own (different) shape.
+const emph = (marker, cls) => (_, t) => `${mark(marker)}<span class="${cls}">${t}</span>${mark(marker)}`;
 
 // Wrap emphasis and links on one already-escaped, non-code run, re-emitting every original
 // marker character inside an .md-mark span so textContent === the source run. Order mirrors
@@ -594,10 +599,10 @@ function formatInline(run) {
       /\[([^\]]+)\]\(([^)]+)\)/g,
       (_, t, u) => `${mark("[")}<span class="md-link">${t}</span>${mark("](")}<span class="md-url">${u}</span>${mark(")")}`,
     )
-    .replace(/\*\*([^*]+)\*\*/g, (_, t) => `${mark("**")}<span class="md-strong">${t}</span>${mark("**")}`)
-    .replace(/__([^_]+)__/g, (_, t) => `${mark("__")}<span class="md-strong">${t}</span>${mark("__")}`)
-    .replace(/\*([^*]+)\*/g, (_, t) => `${mark("*")}<span class="md-em">${t}</span>${mark("*")}`)
-    .replace(/_([^_]+)_/g, (_, t) => `${mark("_")}<span class="md-em">${t}</span>${mark("_")}`);
+    .replace(/\*\*([^*]+)\*\*/g, emph("**", "md-strong"))
+    .replace(/__([^_]+)__/g, emph("__", "md-strong"))
+    .replace(/\*([^*]+)\*/g, emph("*", "md-em"))
+    .replace(/_([^_]+)_/g, emph("_", "md-em"));
 }
 
 // Inline highlight of one already-escaped run: partition `code` spans (odd segments) from
@@ -612,32 +617,33 @@ function highlightInline(escaped) {
     .join("");
 }
 
-// One source line -> one block <div class="md-line …">. The div's textContent equals the
-// source line exactly (markers kept), so the lines join back to the raw Markdown. An empty
-// line becomes <br> so it keeps height and stays selectable. `kind` is precomputed by
-// highlightMarkdown (it carries fenced-code state across lines); code lines are literal.
-function highlightLine(line, kind) {
-  if (kind === "blank") return `<div class="md-line"><br></div>`;
-  if (kind === "code") {
+// One renderer per line kind -> that source line's HTML. Keyed dispatch (like task 10's
+// TAKE and tasks 11–12's NOTE_MODES) so adding a kind is one entry, not a new branch. Each
+// div's textContent equals the source line exactly (markers kept), so the lines join back
+// to the raw Markdown; an empty line becomes <br> so it keeps height and stays selectable.
+// highlightMarkdown only ever produces these seven kinds (it precomputes fenced-code state,
+// so code lines arrive as "code" and are literal), making the table total.
+const LINE = {
+  blank: () => `<div class="md-line"><br></div>`,
+  code: (line) => {
     const body = escapeHtml(line);
     return `<div class="md-line md-code">${body === "" ? "<br>" : body}</div>`;
-  }
-  if (kind === "hr") return `<div class="md-line md-hr">${mark(escapeHtml(line))}</div>`;
-  if (kind === "heading") {
+  },
+  hr: (line) => `<div class="md-line md-hr">${mark(escapeHtml(line))}</div>`,
+  heading: (line) => {
     const [, marker, text] = line.match(HEADING);
-    const level = marker.trim().length; // number of # characters
-    return `<div class="md-line md-h${level}">${mark(escapeHtml(marker))}${highlightInline(escapeHtml(text))}</div>`;
-  }
-  if (kind === "quote") {
+    return `<div class="md-line md-h${marker.trim().length}">${mark(escapeHtml(marker))}${highlightInline(escapeHtml(text))}</div>`;
+  },
+  quote: (line) => {
     const [, marker, text] = line.match(QUOTE_MARKER);
     return `<div class="md-line md-quote">${mark(escapeHtml(marker))}${highlightInline(escapeHtml(text))}</div>`;
-  }
-  if (kind === "list") {
+  },
+  list: (line) => {
     const [, indent, bullet, gap, text] = line.match(LIST_ITEM);
     return `<div class="md-line md-li">${escapeHtml(indent)}${mark(escapeHtml(bullet + gap))}${highlightInline(escapeHtml(text))}</div>`;
-  }
-  return `<div class="md-line">${highlightInline(escapeHtml(line))}</div>`;
-}
+  },
+  para: (line) => `<div class="md-line">${highlightInline(escapeHtml(line))}</div>`,
+};
 
 // Render the raw Markdown to the editor's HTML: one block <div> per source line, every
 // character preserved. Fenced-code state is tracked across lines so a fence body styles as
@@ -652,7 +658,7 @@ function highlightMarkdown(src) {
       const fence = FENCE.test(line);
       const kind = inFence || fence ? "code" : blockKind(line);
       if (fence) inFence = !inFence;
-      return highlightLine(line, kind);
+      return LINE[kind](line);
     })
     .join("");
 }
