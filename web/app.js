@@ -91,6 +91,10 @@ const els = {
   modalInput: document.getElementById("label-input"),
   modalError: document.getElementById("label-error"),
   modalCancel: document.getElementById("label-cancel"),
+  main: document.querySelector("main"),
+  panes: document.querySelector(".panes"),
+  nav: document.querySelector(".bottom-nav"),
+  navButtons: Array.from(document.querySelectorAll(".bottom-nav button")),
 };
 
 // Filter label selects keyed by kind name, parallel to how els[kind] keys the
@@ -834,8 +838,73 @@ els.noteInput.addEventListener("paste", (e) => {
 els.noteInput.addEventListener("blur", flushNote);
 window.addEventListener("pagehide", flushNoteBeacon);
 
+// --- Mobile view switching (bottom nav + swipe) -------------------------------------------
+// The two panes are an ordered list of views: the nav-button order, the swipe direction, and
+// the default view all derive from this one array. Add a view here + a matching <button> and
+// nothing else changes. (THE VIEW ORDER — one home.)
+const VIEWS = ["note", "todo"];
+
+// The single place the active view changes: record it on <main> (CSS reads data-view to show
+// one pane on mobile) and reflect it on the nav buttons. Both the nav click and the swipe
+// call this — one switch, two inputs.
+function setView(view) {
+  els.main.dataset.view = view;
+  for (const btn of els.navButtons) {
+    const active = btn.dataset.view === view;
+    btn.classList.toggle("is-active", active);
+    if (active) btn.setAttribute("aria-current", "page");
+    else btn.removeAttribute("aria-current");
+  }
+}
+
+for (const btn of els.navButtons) {
+  btn.addEventListener("click", () => setView(btn.dataset.view));
+}
+
+const SWIPE_MIN = 50; // px of horizontal travel before a drag counts as a view swipe
+
+// "Are we in the mobile single-pane layout?" — read CSS's own decision instead of re-encoding
+// the 720px breakpoint here, so the breakpoint lives in exactly one place (the @media rule).
+// The bottom bar is display:none on desktop and shown on mobile, so its computed display IS
+// the layout mode.
+const onMobile = () => getComputedStyle(els.nav).display !== "none";
+
+let swipeStartX = null;
+let swipeStartY = null;
+els.panes.addEventListener(
+  "touchstart",
+  (e) => {
+    // Only single-finger gestures while the single-pane layout is active; else ignore.
+    if (!onMobile() || e.touches.length !== 1) {
+      swipeStartX = null;
+      return;
+    }
+    swipeStartX = e.touches[0].clientX;
+    swipeStartY = e.touches[0].clientY;
+  },
+  { passive: true },
+);
+els.panes.addEventListener(
+  "touchend",
+  (e) => {
+    if (swipeStartX === null) return;
+    const dx = e.changedTouches[0].clientX - swipeStartX;
+    const dy = e.changedTouches[0].clientY - swipeStartY;
+    swipeStartX = null;
+    // Ignore taps, short drags, and vertical-dominant drags (those scroll the pane).
+    if (Math.abs(dx) < SWIPE_MIN || Math.abs(dx) <= Math.abs(dy)) return;
+    const cur = VIEWS.indexOf(els.main.dataset.view);
+    const next = cur + (dx < 0 ? 1 : -1); // swipe left → next view, right → previous
+    if (next >= 0 && next < VIEWS.length) setView(VIEWS[next]);
+  },
+  { passive: true },
+);
+
 initPriorityOptions();
 initFilterOptions();
+// Adopt the view declared in the markup (<main data-view="note">) so first paint is correct
+// without JS; this only syncs the nav highlight. VIEWS[0] is a defensive fallback.
+setView(els.main.dataset.view || VIEWS[0]);
 refresh();
 loadLabels();
 loadNote();

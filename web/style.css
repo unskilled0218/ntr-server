@@ -12,22 +12,22 @@
   box-sizing: border-box;
 }
 
-/* DESKTOP FIXED-HEIGHT LAYOUT (the no-scroll mode). Every declaration tagged [fixed-height]
-   below is reversed in the @media (max-width: 720px) block so narrow screens scroll the page
-   normally; keep the two in sync — a new viewport-pinning rule here needs its undo there. */
+/* FIXED-HEIGHT LAYOUT (no page scroll), at every width: the page is one viewport tall and
+   panes scroll internally. On mobile the @media block below shows one pane at a time + a
+   bottom bar; on desktop both panes show side by side. */
 body {
   margin: 0;
   background: var(--bg);
   color: var(--fg);
   font: 16px/1.5 system-ui, sans-serif;
-  overflow: hidden; /* [fixed-height] the page never scrolls; panes scroll internally */
+  overflow: hidden; /* the page never scrolls; panes scroll internally */
 }
 
 main {
   max-width: 1100px;
   margin: 0 auto;
   padding: 2rem 1rem;
-  height: 100dvh; /* [fixed-height] one viewport tall (border-box keeps padding inside) */
+  height: 100dvh; /* one viewport tall (border-box keeps padding inside) */
   display: flex;
   flex-direction: column;
 }
@@ -41,7 +41,7 @@ h1 {
   display: flex;
   gap: 1.5rem;
   /* align-items: stretch (default) so each pane is full column height and can host an
-     internal scroll region; min-height: 0 lets it shrink to the viewport. [fixed-height] */
+     internal scroll region; min-height: 0 lets it shrink to the viewport. */
   flex: 1;
   min-height: 0;
 }
@@ -56,28 +56,43 @@ h1 {
   min-height: 0;
 }
 
-/* On narrow screens the two panes stack (note above todo), restoring the original
-   single-column feel without hiding anything. */
+/* The bottom view-switcher bar: hidden on desktop (both panes show side by side); shown on
+   mobile, where it is the single source of truth for "are we in single-pane mode" — app.js
+   reads its computed display rather than re-encoding the breakpoint. */
+.bottom-nav {
+  display: none;
+}
+
+/* On narrow screens the app shows one pane at a time: <main data-view> selects which, the
+   bottom bar switches between them, and a horizontal swipe (app.js) does the same. The page
+   stays one viewport tall (base layout) and the visible pane scrolls internally. */
 @media (max-width: 720px) {
-  .panes {
-    flex-direction: column;
+  .pane {
+    display: none;
+  }
+  main[data-view="note"] .note-pane,
+  main[data-view="todo"] .todo-pane {
+    display: flex; /* re-show; flex-direction: column comes from the base .pane rule */
   }
 
-  /* UNDO the [fixed-height] desktop layout: on narrow screens the page scrolls and the panes
-     flow naturally. One reversal per [fixed-height] rule above. */
-  body {
-    overflow: auto;
+  .bottom-nav {
+    display: flex;
+    flex: none; /* a fixed-height bar; .panes (flex: 1) takes the remaining height */
+    border-top: 1px solid var(--border);
+    background: #fff;
   }
-  main {
-    height: auto;
+  .bottom-nav button {
+    flex: 1; /* two equal-width segments */
+    border: none;
+    border-radius: 0;
+    background: none;
+    padding: 0.75rem;
+    color: var(--muted);
+    font: inherit;
   }
-  .note-input {
-    flex: none;
-    min-height: 60vh; /* page-scroll-mode editor height (the floor used before this layout) */
-  }
-  .task-list {
-    flex: none;
-    overflow-y: visible;
+  .bottom-nav button.is-active {
+    color: var(--accent);
+    font-weight: 600;
   }
 }
 
@@ -86,8 +101,8 @@ h1 {
    white-space: pre-wrap renders newlines and runs of spaces as typed and wraps long lines;
    overflow-wrap keeps an unbroken URL from forcing horizontal scroll. */
 .note-input {
-  flex: 1; /* [fixed-height] take the height left under the h1 and the status bar */
-  min-height: 0; /* [fixed-height] shrink to the pane so its own overflow: auto scrolls */
+  flex: 1; /* take the height left under the h1 and the status bar */
+  min-height: 0; /* shrink to the pane so its own overflow: auto scrolls */
   padding: 0.5rem 0.75rem;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -274,9 +289,9 @@ form#add-form button {
 /* The todo scroll region: the heading, add form, and filters above it stay fixed (the "menu"),
    and only this list area scrolls. #empty/#error live inside it, so they scroll with the list. */
 .task-list {
-  flex: 1; /* [fixed-height] fill the height under the heading + add form + filters */
+  flex: 1; /* fill the height under the heading + add form + filters */
   min-height: 0;
-  overflow-y: auto; /* [fixed-height] only the task list scrolls */
+  overflow-y: auto; /* only the task list scrolls */
 }
 
 ul#tasks {

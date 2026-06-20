@@ -7,9 +7,9 @@
     <link rel="stylesheet" href="/static/style.css" />
   </head>
   <body>
-    <main>
+    <main data-view="note">
       <div class="panes">
-        <section class="pane note-pane">
+        <section class="pane note-pane" id="note-view">
           <h1>note</h1>
           <div
             id="note-input"
@@ -25,7 +25,7 @@
           </div>
         </section>
 
-        <section class="pane todo-pane">
+        <section class="pane todo-pane" id="todo-view">
           <h1>todo</h1>
 
           <form id="add-form" autocomplete="off">
@@ -84,6 +84,11 @@
           </div>
         </section>
       </div>
+
+      <nav class="bottom-nav" aria-label="Switch view">
+        <button type="button" data-view="note" aria-controls="note-view">Note</button>
+        <button type="button" data-view="todo" aria-controls="todo-view">Todo</button>
+      </nav>
 
       <dialog id="label-modal">
         <form id="label-form" autocomplete="off">
