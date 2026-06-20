@@ -82,6 +82,9 @@ const els = {
   empty: document.getElementById("empty"),
   error: document.getElementById("error"),
   noteInput: document.getElementById("note-input"),
+  notePreview: document.getElementById("note-preview"),
+  noteEditTab: document.getElementById("note-edit-tab"),
+  notePreviewTab: document.getElementById("note-preview-tab"),
   noteStatus: document.getElementById("note-status"),
   status: document.getElementById("filter-status"),
   sort: document.getElementById("filter-sort"),
@@ -541,6 +544,178 @@ async function loadNote() {
   }
 }
 
+// --- Markdown preview (a small, dependency-free, intentionally-subset renderer) ---
+// The note is stored and served as raw Markdown; the Preview tab renders it client-side
+// the way Obsidian's reading view does. Everything below renderMarkdown is pure (string
+// in, HTML string out) so it stays trivially reasoned-about and away from the DOM.
+
+// Block line-patterns needed in more than one place, named once so each "what marks this
+// block" decision has a single home. None carry the `g` flag, so reusing them with
+// `.test` across the parse loop is stateless and safe.
+const LIST_ITEM = /^\s*([-*+]|\d+\.)\s+/; // any list item (the leading marker)
+const ORDERED_ITEM = /^\s*\d+\.\s+/; //      an ordered list item specifically
+const FENCE = /^```/; //                     a fenced-code delimiter line
+const QUOTE_MARKER = /^>\s?/; //             a blockquote line (and the prefix to strip)
+
+// Escape the HTML-significant characters so note text can never inject markup into the
+// rendered preview. Every user-supplied run passes through here before it reaches
+// innerHTML; only the tags this file emits are literal.
+function escapeHtml(s) {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+// Allow only safe link targets — http(s), mailto, and relative/anchor links. Anything
+// else (notably javascript:) collapses to "#", so a crafted link cannot run script.
+function safeHref(url) {
+  const u = url.trim();
+  if (/^(https?:|mailto:)/i.test(u)) return u;
+  if (/^[/#.]/.test(u)) return u; // relative path or in-page anchor
+  return "#";
+}
+
+// Links, then bold, then italic, on a non-code escaped run. Links resolve through
+// safeHref and open in a new tab with noopener; bold runs before italic so ** is not
+// consumed by the single-* rule.
+function formatText(s) {
+  return s
+    .replace(
+      /\[([^\]]+)\]\(([^)]+)\)/g,
+      (_, t, u) => `<a href="${safeHref(u)}" target="_blank" rel="noopener noreferrer">${t}</a>`,
+    )
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/__([^_]+)__/g, "<strong>$1</strong>")
+    .replace(/\*([^*]+)\*/g, "<em>$1</em>")
+    .replace(/_([^_]+)_/g, "<em>$1</em>");
+}
+
+// Inline emphasis/links/code for one already-escaped text run. Splitting on backtick
+// code spans (odd indices) keeps code literal; even indices get the rest of the inline
+// formatting.
+function renderInline(escaped) {
+  return escaped
+    .split(/`([^`]+)`/)
+    .map((part, i) => (i % 2 ? `<code>${part}</code>` : formatText(part)))
+    .join("");
+}
+
+// Classify the block a line begins — the single source of "what kind of line is this".
+// The render loop dispatches on it and takeParagraph stops when a line stops being
+// "para", so the block-detection patterns are never duplicated.
+function blockKind(line) {
+  if (line.trim() === "") return "blank";
+  if (FENCE.test(line)) return "fence";
+  if (/^#{1,6}\s/.test(line)) return "heading";
+  if (/^(---|\*\*\*|___)\s*$/.test(line)) return "hr";
+  if (QUOTE_MARKER.test(line)) return "quote";
+  if (LIST_ITEM.test(line)) return "list";
+  return "para";
+}
+
+function takeHeading(lines, i) {
+  const [, hashes, text] = lines[i].match(/^(#{1,6})\s+(.*)$/);
+  const level = hashes.length;
+  return { html: `<h${level}>${renderInline(escapeHtml(text))}</h${level}>`, next: i + 1 };
+}
+
+function takeFence(lines, i) {
+  let j = i + 1;
+  const body = [];
+  while (j < lines.length && !FENCE.test(lines[j])) {
+    body.push(lines[j]);
+    j += 1;
+  }
+  if (j < lines.length) j += 1; // consume the closing fence
+  // Code is escaped but NOT inline-formatted — it is literal.
+  return { html: `<pre><code>${escapeHtml(body.join("\n"))}</code></pre>`, next: j };
+}
+
+function takeBlockquote(lines, i) {
+  let j = i;
+  const buf = [];
+  while (j < lines.length && blockKind(lines[j]) === "quote") {
+    buf.push(lines[j].replace(QUOTE_MARKER, ""));
+    j += 1;
+  }
+  const inner = renderInline(escapeHtml(buf.join("\n"))).replace(/\n/g, "<br>");
+  return { html: `<blockquote>${inner}</blockquote>`, next: j };
+}
+
+function takeList(lines, i) {
+  const ordered = ORDERED_ITEM.test(lines[i]);
+  const items = [];
+  let j = i;
+  // One list = consecutive list lines of the same kind (ordered vs unordered); a switch
+  // starts a new list. One level only — indentation is not nested.
+  while (j < lines.length && blockKind(lines[j]) === "list" && ORDERED_ITEM.test(lines[j]) === ordered) {
+    const text = lines[j].replace(LIST_ITEM, "");
+    items.push(`<li>${renderInline(escapeHtml(text))}</li>`);
+    j += 1;
+  }
+  const tag = ordered ? "ol" : "ul";
+  return { html: `<${tag}>${items.join("")}</${tag}>`, next: j };
+}
+
+function takeParagraph(lines, i) {
+  let j = i;
+  const buf = [];
+  while (j < lines.length && blockKind(lines[j]) === "para") {
+    buf.push(lines[j]);
+    j += 1;
+  }
+  const text = renderInline(escapeHtml(buf.join("\n"))).replace(/\n/g, "<br>");
+  return { html: `<p>${text}</p>`, next: j };
+}
+
+// Block consumers keyed by blockKind, so renderMarkdown stays a flat dispatch.
+const TAKE = {
+  fence: takeFence,
+  heading: takeHeading,
+  hr: (lines, i) => ({ html: "<hr>", next: i + 1 }),
+  quote: takeBlockquote,
+  list: takeList,
+  para: takeParagraph,
+};
+
+// Render a Markdown subset to an HTML string. Supported: headings (#..######), bold,
+// italic, inline code, fenced code blocks, blockquotes, unordered/ordered lists (one
+// level), horizontal rules, links, and paragraphs with single-line breaks. Unsupported
+// constructs (tables, images, nested lists, raw HTML) render as their literal text.
+function renderMarkdown(src) {
+  const lines = src.replace(/\r\n?/g, "\n").split("\n");
+  const out = [];
+  let i = 0;
+  while (i < lines.length) {
+    const kind = blockKind(lines[i]);
+    if (kind === "blank") {
+      i += 1;
+      continue;
+    }
+    const block = TAKE[kind](lines, i);
+    out.push(block.html);
+    i = block.next;
+  }
+  return out.join("\n");
+}
+
+// Show one of the note's two views. Entering Preview renders the textarea's CURRENT text
+// (so it always matches what was on screen) into #note-preview; Edit refocuses the
+// textarea. aria-pressed marks the active tab. renderMarkdown's output is already
+// escaped/sanitised, so assigning it to innerHTML is safe.
+function setNoteMode(mode) {
+  const preview = mode === "preview";
+  if (preview) els.notePreview.innerHTML = renderMarkdown(els.noteInput.value);
+  els.noteInput.hidden = preview;
+  els.notePreview.hidden = !preview;
+  els.noteEditTab.setAttribute("aria-pressed", String(!preview));
+  els.notePreviewTab.setAttribute("aria-pressed", String(preview));
+  if (!preview) els.noteInput.focus();
+}
+
 els.form.addEventListener("submit", async (e) => {
   e.preventDefault();
   // A description is the one required field; without it an add is a no-op.
@@ -589,6 +764,10 @@ els.noteInput.addEventListener("input", () => {
 });
 els.noteInput.addEventListener("blur", flushNote);
 window.addEventListener("pagehide", flushNoteBeacon);
+
+// Edit/Preview toggle: the markup ships in Edit mode, so no startup call is needed.
+els.noteEditTab.addEventListener("click", () => setNoteMode("edit"));
+els.notePreviewTab.addEventListener("click", () => setNoteMode("preview"));
 
 initPriorityOptions();
 initFilterOptions();
