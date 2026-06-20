@@ -30,5 +30,10 @@
   { "date": "2026-06-20", "mode": "PR Review", "score": 100, "findings": { "critical": 0, "warning": 0, "suggestion": 0 }, "scope": "code: note-md-live-preview (re-review after isSplit extraction)" },
   { "date": "2026-06-20", "mode": "PR Review", "score": 99, "findings": { "critical": 0, "warning": 0, "suggestion": 1 }, "scope": "tasks/12-note-live-only/plan.md" },
   { "date": "2026-06-20", "mode": "PR Review", "score": 100, "findings": { "critical": 0, "warning": 0, "suggestion": 0 }, "scope": "tasks/12-note-live-only/plan.md (re-review after removing .note-head wrapper)" },
-  { "date": "2026-06-20", "mode": "PR Review", "score": 100, "findings": { "critical": 0, "warning": 0, "suggestion": 0 }, "scope": "code: note-live-only (commit bb20f87)" }
+  { "date": "2026-06-20", "mode": "PR Review", "score": 100, "findings": { "critical": 0, "warning": 0, "suggestion": 0 }, "scope": "code: note-live-only (commit bb20f87)" },
+  { "date": "2026-06-20", "mode": "PR Review", "score": 98, "findings": { "critical": 0, "warning": 0, "suggestion": 2 }, "scope": "tasks/13-note-inplace-preview/plan.md" },
+  { "date": "2026-06-20", "mode": "PR Review", "score": 100, "findings": { "critical": 0, "warning": 0, "suggestion": 0 }, "scope": "tasks/13-note-inplace-preview/plan.md (re-review after lineLen + inline split)" },
+  { "date": "2026-06-20", "mode": "PR Review", "score": 97, "findings": { "critical": 0, "warning": 0, "suggestion": 3 }, "scope": "code: note-inplace-preview (commit 3d86405)" },
+  { "date": "2026-06-20", "mode": "PR Review", "score": 100, "findings": { "critical": 0, "warning": 0, "suggestion": 0 }, "scope": "tasks/13-note-inplace-preview/review-plan.md (fix plan)" },
+  { "date": "2026-06-20", "mode": "PR Review", "score": 100, "findings": { "critical": 0, "warning": 0, "suggestion": 0 }, "scope": "code: note-inplace-preview (re-review after LINE table + emph helper)" }
 ]
