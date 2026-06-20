@@ -6,6 +6,8 @@ use std::path::PathBuf;
 pub struct Config {
   /// Path to the todo.txt file (env `TODO_FILE`, default `todo.txt`).
   pub file: PathBuf,
+  /// Path to the Markdown note file (env `NOTE_FILE`, default `Note.md`).
+  pub note_file: PathBuf,
   /// Bind host (env `HOST`, default `127.0.0.1`).
   pub host: String,
   /// Bind port (env `PORT`, default `8080`).
@@ -19,6 +21,7 @@ impl Default for Config {
   fn default() -> Self {
     Config {
       file: PathBuf::from("todo.txt"),
+      note_file: PathBuf::from("Note.md"),
       host: "127.0.0.1".to_string(),
       port: 8080,
       add_creation_date: true,
@@ -34,6 +37,9 @@ impl Config {
       file: std::env::var_os("TODO_FILE")
         .map(PathBuf::from)
         .unwrap_or(defaults.file),
+      note_file: std::env::var_os("NOTE_FILE")
+        .map(PathBuf::from)
+        .unwrap_or(defaults.note_file),
       host: std::env::var("HOST").unwrap_or(defaults.host),
       port: std::env::var("PORT")
         .ok()

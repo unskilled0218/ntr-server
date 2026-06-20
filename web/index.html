@@ -8,37 +8,78 @@
   </head>
   <body>
     <main>
-      <h1>todo</h1>
+      <div class="panes">
+        <section class="pane note-pane">
+          <h1>note</h1>
+          <textarea
+            id="note-input"
+            class="note-input"
+            aria-label="Note (Markdown)"
+            placeholder="Notes (Markdown)…"
+          ></textarea>
+          <div class="note-bar">
+            <button type="button" id="note-save" disabled>Save</button>
+            <span id="note-status" class="note-status" role="status"></span>
+          </div>
+        </section>
 
-      <form id="add-form" autocomplete="off">
-        <div class="add-row">
-          <input
-            id="add-input"
-            type="text"
-            placeholder="Add a task, e.g. call bank"
-            aria-label="New task"
-          />
-          <button type="submit">Add</button>
-        </div>
-        <div class="add-fields">
-          <label>
-            Priority
-            <select id="add-priority" aria-label="Priority"></select>
-          </label>
-          <label>
-            Due
-            <input id="add-due" type="date" aria-label="Due date" />
-          </label>
-          <label>
-            Projects
-            <select id="add-project" aria-label="Project"></select>
-          </label>
-          <label>
-            Contexts
-            <select id="add-context" aria-label="Context"></select>
-          </label>
-        </div>
-      </form>
+        <section class="pane todo-pane">
+          <h1>todo</h1>
+
+          <form id="add-form" autocomplete="off">
+            <div class="add-row">
+              <input
+                id="add-input"
+                type="text"
+                placeholder="Add a task, e.g. call bank"
+                aria-label="New task"
+              />
+              <button type="submit">Add</button>
+            </div>
+            <div class="add-fields">
+              <label>
+                Priority
+                <select id="add-priority" aria-label="Priority"></select>
+              </label>
+              <label>
+                Due
+                <input id="add-due" type="date" aria-label="Due date" />
+              </label>
+              <label>
+                Projects
+                <select id="add-project" aria-label="Project"></select>
+              </label>
+              <label>
+                Contexts
+                <select id="add-context" aria-label="Context"></select>
+              </label>
+            </div>
+          </form>
+
+          <div id="filters">
+            <label>
+              Status
+              <select id="filter-status" aria-label="Status filter"></select>
+            </label>
+            <label>
+              Project
+              <select id="filter-project" aria-label="Project filter"></select>
+            </label>
+            <label>
+              Context
+              <select id="filter-context" aria-label="Context filter"></select>
+            </label>
+            <label>
+              Sort
+              <select id="filter-sort" aria-label="Sort order"></select>
+            </label>
+          </div>
+
+          <ul id="tasks"></ul>
+          <p id="empty" hidden>No tasks.</p>
+          <p id="error" role="alert" hidden></p>
+        </section>
+      </div>
 
       <dialog id="label-modal">
         <form id="label-form" autocomplete="off">
@@ -54,29 +95,6 @@
           </div>
         </form>
       </dialog>
-
-      <div id="filters">
-        <label>
-          Status
-          <select id="filter-status" aria-label="Status filter"></select>
-        </label>
-        <label>
-          Project
-          <select id="filter-project" aria-label="Project filter"></select>
-        </label>
-        <label>
-          Context
-          <select id="filter-context" aria-label="Context filter"></select>
-        </label>
-        <label>
-          Sort
-          <select id="filter-sort" aria-label="Sort order"></select>
-        </label>
-      </div>
-
-      <ul id="tasks"></ul>
-      <p id="empty" hidden>No tasks.</p>
-      <p id="error" role="alert" hidden></p>
     </main>
 
     <script src="/static/app.js"></script>

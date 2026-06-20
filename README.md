@@ -17,6 +17,7 @@ Configuration (environment variables):
 | Variable                 | Default       | Meaning                                            |
 | ------------------------ | ------------- | -------------------------------------------------- |
 | `TODO_FILE`              | `todo.txt`    | Path to the todo.txt file.                         |
+| `NOTE_FILE`              | `Note.md`     | Path to the free-form Markdown note file.          |
 | `HOST`                   | `127.0.0.1`   | Bind address.                                      |
 | `PORT`                   | `8080`        | Bind port.                                         |
 | `TODO_ADD_CREATION_DATE` | `true`        | Stamp a creation date on new incomplete tasks.     |
@@ -55,6 +56,8 @@ All task responses use this JSON shape:
 | `DELETE /api/tasks/{id}`         | Delete (204 on success).                          |
 | `GET /api/raw`                   | Whole file as `text/plain`.                       |
 | `PUT /api/raw`                   | Replace the whole file from a `text/plain` body.  |
+| `GET /api/note`                  | The Markdown note as `text/markdown`.             |
+| `PUT /api/note`                  | Replace the note from a text body (`204`).        |
 
 ### Task ids
 
@@ -70,9 +73,25 @@ Priorities `(A)`–`(Z)`, completion (`x`), completion/creation dates,
 `+projects`, `@contexts`, and `key:value` tags. When a task is completed its
 priority is preserved as a `pri:X` tag and restored on un-completion.
 
+## Note (Note.md)
+
+Alongside the task file the server keeps a single free-form Markdown note in
+`NOTE_FILE` (default `Note.md`). It is userless and unstructured — one block of
+text, the scratchpad counterpart to the structured todo.txt — stored in its own
+file, cached in memory, and written atomically (temp file + rename) just like the
+task store, so the file and memory never diverge. A missing file is treated as an
+empty note. There is no per-task note and no versioning; `PUT /api/note` is
+last-write-wins, the same as `PUT /api/raw` for the task file.
+
 ## WebUI
 
-The page at `/` lists, filters, and edits tasks. The add form has a free-text
+The page at `/` is split into two panes side by side: the **note** on the left and
+the **todo** on the right (they stack vertically on narrow screens). The note pane
+is a plain editor over the raw `Note.md` text (no Markdown preview) with a **Save**
+button that is enabled only while there are unsaved edits; a status line shows
+`Unsaved changes` / `Saved`, or a load/save error.
+
+The todo pane lists, filters, and edits tasks. The add form has a free-text
 description plus four native dropdown/picker controls beneath it, all styled
 alike — a priority dropdown (`A`–`C`), a due-date picker (written as a `due:`
 tag), and single-select `+project` and `@context` dropdowns — so common fields
