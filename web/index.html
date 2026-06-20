@@ -85,6 +85,8 @@
         </section>
       </div>
 
+      <!-- Button order must match VIEWS in app.js: swipe direction is computed from that array,
+           so the bar's left-to-right order and the swipe order share one source of truth. -->
       <nav class="bottom-nav" aria-label="Switch view">
         <button type="button" data-view="note" aria-controls="note-view">Note</button>
         <button type="button" data-view="todo" aria-controls="todo-view">Todo</button>
