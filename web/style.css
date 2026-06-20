@@ -47,7 +47,8 @@ form#add-form {
   gap: 0.75rem;
 }
 
-.add-fields label {
+.add-fields label,
+#filters label {
   display: flex;
   flex-direction: column;
   gap: 0.2rem;
@@ -56,6 +57,7 @@ form#add-form {
 }
 
 .add-fields select,
+#filters select,
 .add-fields input[type="date"] {
   padding: 0.4rem 0.5rem;
   border: 1px solid var(--border);
@@ -90,21 +92,10 @@ form#add-form button {
 
 #filters {
   display: flex;
-  gap: 0.5rem;
-  align-items: center;
+  gap: 0.75rem;
+  align-items: flex-end;
   margin-bottom: 1rem;
   flex-wrap: wrap;
-}
-
-#filters button.active {
-  background: var(--accent);
-  color: #fff;
-  border-color: var(--accent);
-}
-
-#tag-filter {
-  flex: 1;
-  min-width: 12rem;
 }
 
 ul#tasks {
