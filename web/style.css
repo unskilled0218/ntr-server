@@ -158,6 +158,55 @@ li.task.completed .text {
   font-size: 0.85rem;
 }
 
+dialog#label-modal {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1.25rem;
+  min-width: 18rem;
+  color: var(--fg);
+}
+
+dialog#label-modal::backdrop {
+  background: rgba(0, 0, 0, 0.35);
+}
+
+#label-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+#label-form h2 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+#label-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.modal-actions button[type="submit"] {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+.modal-error {
+  margin: 0;
+  color: #b91c1c;
+  font-size: 0.85rem;
+}
+
 #error {
   color: #b91c1c;
 }

@@ -5,14 +5,34 @@
 // markup and the compose/populate logic. The select itself holds its options and
 // current value, so no separate per-kind selection state is needed.
 const KINDS = {
-  project: { prefix: "+", plural: "Projects" },
-  context: { prefix: "@", plural: "Contexts" },
+  project: { prefix: "+", singular: "project", plural: "Projects" },
+  context: { prefix: "@", singular: "context", plural: "Contexts" },
 };
+
+// The "add" entry pinned at the bottom of each label select. It is recognised by
+// its data-add flag (set in populateLabelSelect), never by this value, so a real
+// label can never be mistaken for it. The value is a validator-forbidden token
+// (`+` is rejected in a real label name) purely as defence-in-depth.
+const ADD_VALUE = "+add";
 
 const state = {
   filter: "all", // all | active | completed
   tag: "",
 };
+
+// Labels created in the modal but not yet attached to any task. todo.txt has no
+// label store, so a brand-new label lives here until a task using it is saved;
+// the rendered options are (server-derived labels) ∪ staged. One Set per kind.
+const staged = { project: new Set(), context: new Set() };
+
+// The current real selection of each label select, remembered so that choosing
+// the "add" entry can restore the prior pick instead of leaving the sentinel
+// selected. Never holds the sentinel.
+const priorLabel = { project: "", context: "" };
+
+// The kind whose "add" entry opened the modal, so the submit handler knows which
+// select to stage the new label into.
+let modalKind = null;
 
 const els = {
   form: document.getElementById("add-form"),
@@ -28,6 +48,12 @@ const els = {
   error: document.getElementById("error"),
   tagFilter: document.getElementById("tag-filter"),
   filterButtons: Array.from(document.querySelectorAll("#filters button[data-filter]")),
+  modal: document.getElementById("label-modal"),
+  modalForm: document.getElementById("label-form"),
+  modalTitle: document.getElementById("label-modal-title"),
+  modalInput: document.getElementById("label-input"),
+  modalError: document.getElementById("label-error"),
+  modalCancel: document.getElementById("label-cancel"),
 };
 
 function showError(message) {
@@ -186,22 +212,28 @@ function initPriorityOptions() {
 }
 
 // Rebuild one label select's option list: a blank placeholder (text = the field
-// caption, mirroring the Priority select) followed by the sorted label names.
-// The current pick is preserved across reloads only while it still exists,
-// otherwise it falls back to the placeholder.
+// caption, mirroring the Priority select), the sorted label names, then the "add"
+// entry pinned last. The current pick is preserved across reloads only while it
+// still exists, otherwise it falls back to the placeholder. The add entry is
+// flagged with dataset.add so the change handler recognises it without relying on
+// its value; priorLabel[kind] is kept in sync with the surviving selection.
 function populateLabelSelect(kind, names) {
   const select = els[kind];
   const previous = select.value;
   select.replaceChildren();
   select.add(new Option(KINDS[kind].plural, ""));
   for (const name of [...names].sort()) select.add(new Option(name, name));
+  const addOption = new Option(`+ Add ${KINDS[kind].singular}...`, ADD_VALUE);
+  addOption.dataset.add = "1";
+  select.add(addOption);
   select.value = names.has(previous) ? previous : "";
+  priorLabel[kind] = select.value;
 }
 
-// Refresh both label selects from the labels currently in the store. Options are
-// best-effort: a failure here leaves the form usable, the selects just keep their
-// current options. A select stays empty (placeholder only) until the file holds
-// at least one label of that kind.
+// Refresh both label selects from the labels currently in the store, unioned with
+// any client-staged labels not yet on a task. Options are best-effort: a failure
+// here leaves the form usable, the selects just keep their current options. A
+// select shows only the placeholder + add entry until a label of that kind exists.
 async function loadLabels() {
   let server;
   try {
@@ -215,7 +247,69 @@ async function loadLabels() {
     showError(`Could not load label suggestions: ${err.message}`);
     return;
   }
-  for (const kind of Object.keys(KINDS)) populateLabelSelect(kind, server[kind]);
+  for (const kind of Object.keys(KINDS))
+    populateLabelSelect(kind, new Set([...server[kind], ...staged[kind]]));
+}
+
+// Validate a label name typed in the modal. Pure: no DOM, no side effects, so it
+// is trivially testable. Returns { name } on success or { error } on rejection.
+// Strips leading +/@ sigils a user may type, then forbids whitespace and any
+// +/@/: in the bare name (a key:value name would compose into a tag, not a label).
+function parseLabelInput(raw) {
+  const name = raw.trim().replace(/^[+@]+/, "");
+  if (!name) return { error: "Name is required." };
+  if (/\s/.test(name)) return { error: "No spaces allowed in a project or context." };
+  if (/[+@:]/.test(name)) return { error: "A project or context cannot contain + @ or :" };
+  return { name };
+}
+
+// The "add" entry of a label select was chosen: restore the prior real selection
+// (so the sentinel is never a stuck value) and open the modal for that kind. Any
+// other change is a normal pick, remembered as the new prior value. Recognising
+// the add entry by its dataset flag — not its value — means a real label sharing
+// the sentinel's value string can never be misread as the add entry.
+function onLabelSelectChange(kind) {
+  const select = els[kind];
+  if (select.selectedOptions[0]?.dataset.add) {
+    select.value = priorLabel[kind];
+    openLabelModal(kind);
+    return;
+  }
+  priorLabel[kind] = select.value;
+}
+
+// Open the shared modal for one kind. Native showModal gives a focus trap,
+// backdrop, and Escape-to-dismiss; dismissing changes nothing because the select
+// was already restored to its prior value before this ran.
+function openLabelModal(kind) {
+  modalKind = kind;
+  els.modalTitle.textContent = `Add ${KINDS[kind].singular}`;
+  els.modalInput.value = "";
+  els.modalError.hidden = true;
+  els.modalError.textContent = "";
+  els.modal.showModal();
+  els.modalInput.focus();
+}
+
+// Modal submit: validate, then stage the new label, render it as an option, and
+// select it for the kind that opened the modal. An invalid value shows an inline
+// error and keeps the dialog open; an existing name is just selected, no error.
+function confirmLabel() {
+  const kind = modalKind;
+  const result = parseLabelInput(els.modalInput.value);
+  if (result.error) {
+    els.modalError.textContent = result.error;
+    els.modalError.hidden = false;
+    return;
+  }
+  staged[kind].add(result.name);
+  const names = new Set([...Array.from(els[kind].options).map((o) => o.value), result.name]);
+  names.delete("");
+  names.delete(ADD_VALUE);
+  populateLabelSelect(kind, names);
+  els[kind].value = result.name;
+  priorLabel[kind] = result.name;
+  els.modal.close();
 }
 
 // Build a todo.txt line from the form controls. Pure: reads values, returns a
@@ -236,7 +330,10 @@ function resetAddForm() {
   els.input.value = "";
   els.priority.value = "";
   els.due.value = "";
-  for (const kind of Object.keys(KINDS)) els[kind].value = "";
+  for (const kind of Object.keys(KINDS)) {
+    els[kind].value = "";
+    priorLabel[kind] = "";
+  }
 }
 
 els.form.addEventListener("submit", async (e) => {
@@ -253,6 +350,15 @@ els.form.addEventListener("submit", async (e) => {
     showError(err.message);
   }
 });
+
+for (const kind of Object.keys(KINDS))
+  els[kind].addEventListener("change", () => onLabelSelectChange(kind));
+
+els.modalForm.addEventListener("submit", (e) => {
+  e.preventDefault();
+  confirmLabel();
+});
+els.modalCancel.addEventListener("click", () => els.modal.close());
 
 els.filterButtons.forEach((btn) => {
   btn.addEventListener("click", () => {

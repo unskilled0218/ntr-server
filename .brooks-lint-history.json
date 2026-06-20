@@ -2,5 +2,7 @@
   { "date": "2026-06-19", "mode": "PR Review", "score": 98, "findings": { "critical": 0, "warning": 0, "suggestion": 2 }, "scope": "plans/project-context-dropdowns.md" },
   { "date": "2026-06-19", "mode": "PR Review", "score": 98, "findings": { "critical": 0, "warning": 0, "suggestion": 2 }, "scope": "code: web/* (commit f96e80c)" },
   { "date": "2026-06-19", "mode": "PR Review", "score": 98, "findings": { "critical": 0, "warning": 0, "suggestion": 2 }, "scope": "plans/native-label-selects.md" },
-  { "date": "2026-06-19", "mode": "PR Review", "score": 98, "findings": { "critical": 0, "warning": 0, "suggestion": 2 }, "scope": "code: web/* (commit 65ffb99)" }
+  { "date": "2026-06-19", "mode": "PR Review", "score": 98, "findings": { "critical": 0, "warning": 0, "suggestion": 2 }, "scope": "code: web/* (commit 65ffb99)" },
+  { "date": "2026-06-19", "mode": "PR Review", "score": 94, "findings": { "critical": 0, "warning": 1, "suggestion": 1 }, "scope": "plans/label-add-modal.md" },
+  { "date": "2026-06-19", "mode": "PR Review", "score": 99, "findings": { "critical": 0, "warning": 0, "suggestion": 1 }, "scope": "plans/label-add-modal.md (re-review)" }
 ]
