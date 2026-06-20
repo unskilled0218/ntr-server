@@ -87,9 +87,12 @@ last-write-wins, the same as `PUT /api/raw` for the task file.
 
 The page at `/` is split into two panes side by side: the **note** on the left and
 the **todo** on the right (they stack vertically on narrow screens). The note pane
-is a plain editor over the raw `Note.md` text (no Markdown preview) with a **Save**
-button that is enabled only while there are unsaved edits; a status line shows
-`Unsaved changes` / `Saved`, or a load/save error.
+is a plain editor over the raw `Note.md` text (no Markdown preview) that **auto-saves**:
+there is no Save button. Edits are written shortly after you stop typing (a short
+debounce), immediately when you leave the field, and best-effort when the page closes,
+so the note keeps itself saved. A status line tracks state — `Editing…`, `Saving…`,
+`Saved`, or a red load/save error (a failed save is retried on the next edit). Saving
+is still last-write-wins, the same as `PUT /api/note`.
 
 The todo pane lists, filters, and edits tasks. The add form has a free-text
 description plus four native dropdown/picker controls beneath it, all styled

@@ -21,6 +21,10 @@ const ADD_VALUE = "+add";
 // between the selects.
 const EMPTY_LABEL = "None";
 
+// How long after the last keystroke the note auto-saves. One named source so the
+// debounce length is not a magic number sprinkled through the save logic.
+const NOTE_SAVE_DELAY_MS = 800;
+
 const state = {
   status: "all", // all | active | completed (-> completed query param)
   project: "", // "" = any project, else an exact project name
@@ -78,7 +82,6 @@ const els = {
   empty: document.getElementById("empty"),
   error: document.getElementById("error"),
   noteInput: document.getElementById("note-input"),
-  noteSave: document.getElementById("note-save"),
   noteStatus: document.getElementById("note-status"),
   status: document.getElementById("filter-status"),
   sort: document.getElementById("filter-sort"),
@@ -137,12 +140,14 @@ async function fetchNote() {
   return res.text();
 }
 
-// PUT the note's Markdown text (text body, 204 on success).
-async function putNote(text) {
+// PUT the note's Markdown text (text body, 204 on success). `keepalive` lets the
+// request outlive the page for the pagehide flush; it defaults off for normal saves.
+async function putNote(text, { keepalive = false } = {}) {
   const res = await fetch("/api/note", {
     method: "PUT",
     headers: { "Content-Type": "text/markdown; charset=utf-8" },
     body: text,
+    keepalive,
   });
   await throwIfNotOk(res);
 }
@@ -459,26 +464,70 @@ function resetAddForm() {
   }
 }
 
-// The note text as last loaded or saved. The textarea is "dirty" (unsaved) when it
-// differs from this.
+// The note text as last successfully persisted. The textarea is "dirty" (unsaved)
+// when it differs from this; autosave's job is to drive it back to equal.
 let savedNote = "";
+// Pending debounce timer id (null when none is armed).
+let noteSaveTimer = null;
+// True while a PUT is in flight, so a second flush never starts an overlapping,
+// possibly out-of-order, write (single-flight).
+let savingNote = false;
 
-// Re-derive every note control from the one source of truth — whether the textarea
-// differs from the last saved text. `cleanStatus` is the message to show when the
-// note is clean ("" on load, "Saved" just after a save); when dirty the message is
-// always "Unsaved changes". The Save button and the status line therefore can never
-// disagree about pending edits, because both come from this single check.
-function refreshNote(cleanStatus) {
-  const dirty = els.noteInput.value !== savedNote;
-  els.noteSave.disabled = !dirty;
-  setNoteStatus(dirty ? "Unsaved changes" : cleanStatus, false);
+// The one definition of "the note has unsaved edits": the textarea differs from the
+// last persisted text. Every save path (the flush guard, the post-save re-check, the
+// page-close beacon) asks this, so the dirty rule has a single home.
+function noteDirty() {
+  return els.noteInput.value !== savedNote;
 }
 
 // Single writer for the note status line; `isError` toggles the error styling so a
-// failed load/save shows red in the same slot as the saved/unsaved text.
+// failed load/save shows red in the same slot as the editing/saving/saved text.
 function setNoteStatus(message, isError) {
   els.noteStatus.textContent = message;
   els.noteStatus.classList.toggle("is-error", Boolean(isError));
+}
+
+// (Re)arm the debounce: a save fires NOTE_SAVE_DELAY_MS after the last keystroke.
+function scheduleNoteSave() {
+  clearTimeout(noteSaveTimer);
+  noteSaveTimer = setTimeout(flushNote, NOTE_SAVE_DELAY_MS);
+}
+
+// Persist the note now if it is dirty and no save is already running. Cancels any
+// pending debounce (this IS the save it was waiting for). On completion it re-checks
+// for edits made during the PUT and re-arms the debounce, so the newest text is never
+// left unsaved. Used by the debounce, by blur, and after a save completes.
+async function flushNote() {
+  clearTimeout(noteSaveTimer);
+  noteSaveTimer = null;
+  if (savingNote) return; // single-flight; the in-flight save's re-check will catch up
+  if (!noteDirty()) return; // nothing changed
+  const text = els.noteInput.value;
+  savingNote = true;
+  setNoteStatus("Saving…", false);
+  try {
+    await putNote(text);
+    savedNote = text;
+    setNoteStatus("Saved", false);
+    // The user may have typed during the PUT; persist that newest text too. (flushNote
+    // clears the pending timer before the single-flight return, so a blur/debounce that
+    // fired mid-save left nothing armed — this re-check is what re-arms it.) Only after
+    // a success: a failed save waits for the next edit to retry rather than looping on
+    // a timer against a failing server.
+    if (noteDirty()) scheduleNoteSave();
+  } catch (err) {
+    setNoteStatus(`Could not save note: ${err.message}`, true);
+  } finally {
+    savingNote = false;
+  }
+}
+
+// Best-effort save when the page is going away (tab/window close, navigation).
+// Cannot await on unload, so it uses keepalive and ignores the result; the normal
+// path will have saved everything earlier, this only covers the last unsaved edit.
+function flushNoteBeacon() {
+  if (!noteDirty()) return;
+  putNote(els.noteInput.value, { keepalive: true }).catch(() => {});
 }
 
 async function loadNote() {
@@ -486,20 +535,9 @@ async function loadNote() {
     const text = await fetchNote();
     els.noteInput.value = text;
     savedNote = text;
-    refreshNote(""); // clean: Save disabled, blank status
+    setNoteStatus("", false); // freshly loaded: clean, no message
   } catch (err) {
     setNoteStatus(`Could not load note: ${err.message}`, true);
-  }
-}
-
-async function saveNote() {
-  const text = els.noteInput.value;
-  try {
-    await putNote(text);
-    savedNote = text;
-    refreshNote("Saved"); // clean now: Save disabled, "Saved"
-  } catch (err) {
-    setNoteStatus(`Could not save note: ${err.message}`, true);
   }
 }
 
@@ -543,11 +581,14 @@ els.sort.addEventListener("change", () => {
   render();
 });
 
-// The note pane is independent of the task list: editing re-derives its controls
-// (Save enabled, "Unsaved changes"), and typing back to the saved text clears the
-// hint. Save persists and shows "Saved".
-els.noteInput.addEventListener("input", () => refreshNote(""));
-els.noteSave.addEventListener("click", saveNote);
+// Autosave: typing shows "Editing…" and (re)arms the debounce; leaving the field
+// flushes at once; closing the page flushes best-effort so the last edit survives.
+els.noteInput.addEventListener("input", () => {
+  setNoteStatus("Editing…", false);
+  scheduleNoteSave();
+});
+els.noteInput.addEventListener("blur", flushNote);
+window.addEventListener("pagehide", flushNoteBeacon);
 
 initPriorityOptions();
 initFilterOptions();
