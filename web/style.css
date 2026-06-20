@@ -5,6 +5,7 @@
   --accent: #2563eb;
   --border: #d1d5db;
   --done: #9ca3af;
+  --danger: #b91c1c;
 }
 
 * {
@@ -74,7 +75,7 @@ h1 {
 }
 
 .note-status.is-error {
-  color: #b91c1c;
+  color: var(--danger);
 }
 
 form#add-form {
@@ -251,12 +252,12 @@ dialog#label-modal::backdrop {
 
 .modal-error {
   margin: 0;
-  color: #b91c1c;
+  color: var(--danger);
   font-size: 0.85rem;
 }
 
 #error {
-  color: #b91c1c;
+  color: var(--danger);
 }
 
 #empty {
