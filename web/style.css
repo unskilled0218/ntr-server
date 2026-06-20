@@ -133,19 +133,10 @@ button {
   font: inherit;
 }
 
-form#add-form button,
-.note-bar button {
+form#add-form button {
   background: var(--accent);
   color: #fff;
   border-color: var(--accent);
-}
-
-/* A clean (nothing-to-save) note: the accent Save button reads as inactive. */
-.note-bar button:disabled {
-  background: var(--border);
-  border-color: var(--border);
-  color: #fff;
-  cursor: default;
 }
 
 #filters {
