@@ -75,6 +75,29 @@ h1 {
   border-color: var(--accent);
 }
 
+/* The note's two views (editor + preview). By default it is a plain block: the active
+   view is full width and the other is `hidden`, exactly the Edit/Preview geometry.
+   Live mode adds `.is-split` to show both side by side. */
+.note-views.is-split {
+  display: flex;
+  gap: 1rem;
+}
+
+/* min-width: 0 lets each column shrink instead of overflowing its content. */
+.note-views.is-split > .note-input,
+.note-views.is-split > .note-preview {
+  flex: 1;
+  min-width: 0;
+}
+
+/* On narrow screens (where the outer panes already stack) the Live split would cram two
+   columns into a phone width, so stack the editor above the preview instead. */
+@media (max-width: 720px) {
+  .note-views.is-split {
+    flex-direction: column;
+  }
+}
+
 .note-input {
   width: 100%;
   min-height: 60vh;
