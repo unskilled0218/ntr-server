@@ -7,6 +7,7 @@
 //! swaps in the new in-memory state after the write succeeds, so the file and
 //! memory never diverge.
 
+use crate::atomicfile;
 use crate::task::Task;
 use chrono::NaiveDate;
 use std::fs;
@@ -216,18 +217,11 @@ fn render(entries: &[Entry]) -> String {
   out
 }
 
-/// Atomically write entries: write to a sibling temp file, then rename over the
-/// target so a crash never leaves a partially written todo.txt.
+/// Render entries and write them durably, so a crash never leaves a partially
+/// written todo.txt. The atomic temp-file + rename lives in [`atomicfile`], shared
+/// with the note store.
 fn write_file(path: &Path, entries: &[Entry]) -> io::Result<()> {
-  let data = render(entries);
-
-  let mut tmp = path.as_os_str().to_owned();
-  tmp.push(".tmp");
-  let tmp = PathBuf::from(tmp);
-
-  fs::write(&tmp, data)?;
-  fs::rename(&tmp, path)?;
-  Ok(())
+  atomicfile::write(path, &render(entries))
 }
 
 #[cfg(test)]
