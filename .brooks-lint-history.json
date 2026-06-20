@@ -23,5 +23,7 @@
   { "date": "2026-06-20", "mode": "PR Review", "score": 99, "findings": { "critical": 0, "warning": 0, "suggestion": 1 }, "scope": "plans/note-md-preview.md" },
   { "date": "2026-06-20", "mode": "PR Review", "score": 100, "findings": { "critical": 0, "warning": 0, "suggestion": 0 }, "scope": "plans/note-md-preview.md (re-review after marker-constant extraction)" },
   { "date": "2026-06-20", "mode": "PR Review", "score": 99, "findings": { "critical": 0, "warning": 0, "suggestion": 1 }, "scope": "code: note-md-preview (commit aa7ed4c)" },
-  { "date": "2026-06-20", "mode": "PR Review", "score": 100, "findings": { "critical": 0, "warning": 0, "suggestion": 0 }, "scope": "code: note-md-preview (re-review after QUOTE_MARKER extraction)" }
+  { "date": "2026-06-20", "mode": "PR Review", "score": 100, "findings": { "critical": 0, "warning": 0, "suggestion": 0 }, "scope": "code: note-md-preview (re-review after QUOTE_MARKER extraction)" },
+  { "date": "2026-06-20", "mode": "PR Review", "score": 99, "findings": { "critical": 0, "warning": 0, "suggestion": 1 }, "scope": "tasks/11-note-md-live-preview/plan.md" },
+  { "date": "2026-06-20", "mode": "PR Review", "score": 100, "findings": { "critical": 0, "warning": 0, "suggestion": 0 }, "scope": "tasks/11-note-md-live-preview/plan.md (re-review after NOTE_MODES table)" }
 ]
