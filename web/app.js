@@ -718,6 +718,10 @@ const NOTE_MODES = {
   preview: { tab: els.notePreviewTab, input: false, preview: true },
 };
 
+// A mode that shows both the editor and the preview is the split (Live) view — both the
+// side-by-side layout and the live re-render-on-type key off this one predicate.
+const isSplit = (view) => view.input && view.preview;
+
 // Render the textarea's current Markdown into the preview node. renderMarkdown's output
 // is already escaped/sanitised, so assigning it to innerHTML is safe. scrollTop is saved
 // and restored so a live re-render while typing does not jump the preview to the top
@@ -739,7 +743,7 @@ function setNoteMode(mode) {
   if (view.preview) renderNotePreview();
   els.noteInput.hidden = !view.input;
   els.notePreview.hidden = !view.preview;
-  els.noteViews.classList.toggle("is-split", view.input && view.preview);
+  els.noteViews.classList.toggle("is-split", isSplit(view));
   for (const [m, { tab }] of Object.entries(NOTE_MODES))
     tab.setAttribute("aria-pressed", String(m === mode));
   if (view.input) els.noteInput.focus();
@@ -792,8 +796,7 @@ els.noteInput.addEventListener("input", () => {
   scheduleNoteSave();
   // Re-render only when the on-screen preview tracks the editor — i.e. the split (Live)
   // mode, the one mode showing both views. Edit/Preview never enter this branch.
-  const view = NOTE_MODES[noteMode];
-  if (view.input && view.preview) renderNotePreview();
+  if (isSplit(NOTE_MODES[noteMode])) renderNotePreview();
 });
 els.noteInput.addEventListener("blur", flushNote);
 window.addEventListener("pagehide", flushNoteBeacon);
