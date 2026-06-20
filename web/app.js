@@ -77,6 +77,9 @@ const els = {
   list: document.getElementById("tasks"),
   empty: document.getElementById("empty"),
   error: document.getElementById("error"),
+  noteInput: document.getElementById("note-input"),
+  noteSave: document.getElementById("note-save"),
+  noteStatus: document.getElementById("note-status"),
   status: document.getElementById("filter-status"),
   sort: document.getElementById("filter-sort"),
   modal: document.getElementById("label-modal"),
@@ -100,6 +103,21 @@ function showError(message) {
   els.error.hidden = !message;
 }
 
+// On a non-2xx response, surface the API's JSON {error} message (falling back to
+// the status text) by throwing it. Shared by the JSON api() helper and the
+// plain-text note fetches so the error-extraction logic lives in one place.
+async function throwIfNotOk(res) {
+  if (res.ok) return;
+  let detail = res.statusText;
+  try {
+    const data = await res.json();
+    if (data && data.error) detail = data.error;
+  } catch (_) {
+    /* non-JSON error body */
+  }
+  throw new Error(detail);
+}
+
 async function api(method, path, body) {
   const opts = { method, headers: {} };
   if (body !== undefined) {
@@ -107,18 +125,26 @@ async function api(method, path, body) {
     opts.body = JSON.stringify(body);
   }
   const res = await fetch(path, opts);
-  if (!res.ok) {
-    let detail = res.statusText;
-    try {
-      const data = await res.json();
-      if (data && data.error) detail = data.error;
-    } catch (_) {
-      /* non-JSON error body */
-    }
-    throw new Error(detail);
-  }
+  await throwIfNotOk(res);
   if (res.status === 204) return null;
   return res.json();
+}
+
+// GET the note's Markdown text.
+async function fetchNote() {
+  const res = await fetch("/api/note");
+  await throwIfNotOk(res);
+  return res.text();
+}
+
+// PUT the note's Markdown text (text body, 204 on success).
+async function putNote(text) {
+  const res = await fetch("/api/note", {
+    method: "PUT",
+    headers: { "Content-Type": "text/markdown; charset=utf-8" },
+    body: text,
+  });
+  await throwIfNotOk(res);
 }
 
 function buildQuery() {
@@ -433,6 +459,50 @@ function resetAddForm() {
   }
 }
 
+// The note text as last loaded or saved. The textarea is "dirty" (unsaved) when it
+// differs from this.
+let savedNote = "";
+
+// Re-derive every note control from the one source of truth — whether the textarea
+// differs from the last saved text. `cleanStatus` is the message to show when the
+// note is clean ("" on load, "Saved" just after a save); when dirty the message is
+// always "Unsaved changes". The Save button and the status line therefore can never
+// disagree about pending edits, because both come from this single check.
+function refreshNote(cleanStatus) {
+  const dirty = els.noteInput.value !== savedNote;
+  els.noteSave.disabled = !dirty;
+  setNoteStatus(dirty ? "Unsaved changes" : cleanStatus, false);
+}
+
+// Single writer for the note status line; `isError` toggles the error styling so a
+// failed load/save shows red in the same slot as the saved/unsaved text.
+function setNoteStatus(message, isError) {
+  els.noteStatus.textContent = message;
+  els.noteStatus.classList.toggle("is-error", Boolean(isError));
+}
+
+async function loadNote() {
+  try {
+    const text = await fetchNote();
+    els.noteInput.value = text;
+    savedNote = text;
+    refreshNote(""); // clean: Save disabled, blank status
+  } catch (err) {
+    setNoteStatus(`Could not load note: ${err.message}`, true);
+  }
+}
+
+async function saveNote() {
+  const text = els.noteInput.value;
+  try {
+    await putNote(text);
+    savedNote = text;
+    refreshNote("Saved"); // clean now: Save disabled, "Saved"
+  } catch (err) {
+    setNoteStatus(`Could not save note: ${err.message}`, true);
+  }
+}
+
 els.form.addEventListener("submit", async (e) => {
   e.preventDefault();
   // A description is the one required field; without it an add is a no-op.
@@ -473,7 +543,14 @@ els.sort.addEventListener("change", () => {
   render();
 });
 
+// The note pane is independent of the task list: editing re-derives its controls
+// (Save enabled, "Unsaved changes"), and typing back to the saved text clears the
+// hint. Save persists and shows "Saved".
+els.noteInput.addEventListener("input", () => refreshNote(""));
+els.noteSave.addEventListener("click", saveNote);
+
 initPriorityOptions();
 initFilterOptions();
 refresh();
 loadLabels();
+loadNote();

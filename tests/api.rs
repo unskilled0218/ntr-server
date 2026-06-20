@@ -4,6 +4,7 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use my_ntr_server::api::{router, AppState};
 use my_ntr_server::config::Config;
+use my_ntr_server::note::NoteStore;
 use my_ntr_server::store::Store;
 use serde_json::Value;
 use std::path::PathBuf;
@@ -18,19 +19,43 @@ fn temp_path(tag: &str) -> PathBuf {
 
 fn app(tag: &str) -> axum::Router {
   let path = temp_path(tag);
+  let note_path = temp_path(&format!("{tag}-note"));
   let store = Store::load(&path).unwrap();
+  let note = NoteStore::load(&note_path).unwrap();
   let config = Config {
     file: path,
+    note_file: note_path,
     ..Config::default()
   };
-  router(AppState::new(store, config))
+  router(AppState::new(store, note, config))
+}
+
+async fn body_bytes(resp: axum::response::Response) -> Vec<u8> {
+  axum::body::to_bytes(resp.into_body(), usize::MAX)
+    .await
+    .unwrap()
+    .to_vec()
 }
 
 async fn body_json(resp: axum::response::Response) -> Value {
-  let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
-    .await
-    .unwrap();
-  serde_json::from_slice(&bytes).unwrap()
+  serde_json::from_slice(&body_bytes(resp).await).unwrap()
+}
+
+async fn body_text(resp: axum::response::Response) -> String {
+  String::from_utf8(body_bytes(resp).await).unwrap()
+}
+
+fn get(uri: &str) -> Request<Body> {
+  Request::builder().uri(uri).body(Body::empty()).unwrap()
+}
+
+fn put_text(uri: &str, body: &'static str) -> Request<Body> {
+  Request::builder()
+    .method("PUT")
+    .uri(uri)
+    .header("content-type", "text/plain")
+    .body(Body::from(body))
+    .unwrap()
 }
 
 fn json_post(path: &str, body: Value) -> Request<Body> {
@@ -218,4 +243,26 @@ async fn raw_get_and_replace() {
     .unwrap();
   let list = body_json(resp).await;
   assert_eq!(list.as_array().unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn note_get_and_replace() {
+  let app = app("note");
+
+  // Empty by default.
+  let resp = app.clone().oneshot(get("/api/note")).await.unwrap();
+  assert_eq!(resp.status(), StatusCode::OK);
+  assert_eq!(body_text(resp).await, "");
+
+  // PUT replaces, 204.
+  let resp = app
+    .clone()
+    .oneshot(put_text("/api/note", "# Title\n\n- a note\n"))
+    .await
+    .unwrap();
+  assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+
+  // GET returns the written text.
+  let resp = app.oneshot(get("/api/note")).await.unwrap();
+  assert_eq!(body_text(resp).await, "# Title\n\n- a note\n");
 }

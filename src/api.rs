@@ -1,6 +1,7 @@
 //! HTTP API and WebUI routes.
 
 use crate::config::Config;
+use crate::note::NoteStore;
 use crate::store::{Entry, Filter, Store, StoreError};
 use axum::extract::{Path, Query, State};
 use axum::http::{header, StatusCode};
@@ -11,6 +12,7 @@ use chrono::{Local, NaiveDate};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::BTreeMap;
+use std::io;
 use std::sync::{Arc, RwLock};
 use tower_http::cors::CorsLayer;
 
@@ -18,13 +20,15 @@ use tower_http::cors::CorsLayer;
 #[derive(Clone)]
 pub struct AppState {
   pub store: Arc<RwLock<Store>>,
+  pub note: Arc<RwLock<NoteStore>>,
   pub config: Arc<Config>,
 }
 
 impl AppState {
-  pub fn new(store: Store, config: Config) -> Self {
+  pub fn new(store: Store, note: NoteStore, config: Config) -> Self {
     AppState {
       store: Arc::new(RwLock::new(store)),
+      note: Arc::new(RwLock::new(note)),
       config: Arc::new(config),
     }
   }
@@ -45,6 +49,7 @@ pub fn router(state: AppState) -> Router {
     .route("/api/tasks/{id}/complete", post(complete_task))
     .route("/api/tasks/{id}/uncomplete", post(uncomplete_task))
     .route("/api/raw", get(get_raw).put(put_raw))
+    .route("/api/note", get(get_note).put(put_note))
     // No auth by design (userless server); permissive CORS lets other
     // programs and origins call the API. Bind to loopback unless trusted.
     .layer(CorsLayer::permissive())
@@ -125,6 +130,12 @@ impl From<StoreError> for AppError {
       StoreError::Invalid(m) => AppError::BadRequest(m),
       StoreError::Io(e) => AppError::Internal(e.to_string()),
     }
+  }
+}
+
+impl From<io::Error> for AppError {
+  fn from(e: io::Error) -> Self {
+    AppError::Internal(e.to_string())
   }
 }
 
@@ -226,6 +237,18 @@ async fn get_raw(State(state): State<AppState>) -> Result<Response, AppError> {
 async fn put_raw(State(state): State<AppState>, body: String) -> Result<StatusCode, AppError> {
   let mut store = state.store.write().map_err(lock_err)?;
   store.replace_raw(&body)?;
+  Ok(StatusCode::NO_CONTENT)
+}
+
+async fn get_note(State(state): State<AppState>) -> Result<Response, AppError> {
+  let note = state.note.read().map_err(lock_err)?;
+  let headers = [(header::CONTENT_TYPE, "text/markdown; charset=utf-8")];
+  Ok((headers, note.content().to_string()).into_response())
+}
+
+async fn put_note(State(state): State<AppState>, body: String) -> Result<StatusCode, AppError> {
+  let mut note = state.note.write().map_err(lock_err)?;
+  note.replace(&body)?;
   Ok(StatusCode::NO_CONTENT)
 }
 
