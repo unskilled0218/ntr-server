@@ -13,8 +13,10 @@ existing `PUT /api/note` more often.
   - `noteDirty()` — single definition of "textarea differs from last persisted text",
     called by all three save paths (the adopted brooks-review R3 fix).
   - `scheduleNoteSave()` / `flushNote()` — per-keystroke debounce; `flushNote`
-    single-flights on `savingNote`, persists when dirty, sets the status line, and on
-    completion re-checks `noteDirty()` to re-arm for edits typed during the PUT.
+    single-flights on `savingNote`, persists when dirty, sets the status line, and after
+    a *successful* PUT re-checks `noteDirty()` to re-arm for edits typed during the save.
+    A failed save is not re-armed on a timer — it waits for the next edit (or the
+    page-close beacon), matching the README (see the code-review fix in `reviews/`).
   - `flushNoteBeacon()` — best-effort `keepalive` PUT on `pagehide`.
   - `putNote(text, { keepalive })` — gained the optional keepalive flag (off by
     default) so the page-close flush can outlive the document.

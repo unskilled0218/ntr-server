@@ -509,15 +509,17 @@ async function flushNote() {
     await putNote(text);
     savedNote = text;
     setNoteStatus("Saved", false);
+    // The user may have typed during the PUT; persist that newest text too. (flushNote
+    // clears the pending timer before the single-flight return, so a blur/debounce that
+    // fired mid-save left nothing armed — this re-check is what re-arms it.) Only after
+    // a success: a failed save waits for the next edit to retry rather than looping on
+    // a timer against a failing server.
+    if (noteDirty()) scheduleNoteSave();
   } catch (err) {
     setNoteStatus(`Could not save note: ${err.message}`, true);
   } finally {
     savingNote = false;
   }
-  // The user may have typed during the PUT; persist that newest text too. (flushNote
-  // clears the pending timer before the single-flight return, so a blur/debounce that
-  // fired mid-save left nothing armed — this re-check is what re-arms it.)
-  if (noteDirty()) scheduleNoteSave();
 }
 
 // Best-effort save when the page is going away (tab/window close, navigation).
