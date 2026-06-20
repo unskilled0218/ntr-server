@@ -13,5 +13,7 @@
   { "date": "2026-06-20", "mode": "PR Review", "score": 100, "findings": { "critical": 0, "warning": 0, "suggestion": 0 }, "scope": "plans/sort-filter-dropdowns.md (re-review)" },
   { "date": "2026-06-20", "mode": "PR Review", "score": 99, "findings": { "critical": 0, "warning": 0, "suggestion": 1 }, "scope": "code: web/* (commit e320364)" },
   { "date": "2026-06-20", "mode": "PR Review", "score": 99, "findings": { "critical": 0, "warning": 0, "suggestion": 1 }, "scope": "plans/note-md-support.md" },
-  { "date": "2026-06-20", "mode": "PR Review", "score": 100, "findings": { "critical": 0, "warning": 0, "suggestion": 0 }, "scope": "plans/note-md-support.md (re-review)" }
+  { "date": "2026-06-20", "mode": "PR Review", "score": 100, "findings": { "critical": 0, "warning": 0, "suggestion": 0 }, "scope": "plans/note-md-support.md (re-review)" },
+  { "date": "2026-06-20", "mode": "PR Review", "score": 98, "findings": { "critical": 0, "warning": 0, "suggestion": 2 }, "scope": "code: note-md-support (commit 0a376b3)" },
+  { "date": "2026-06-20", "mode": "PR Review", "score": 100, "findings": { "critical": 0, "warning": 0, "suggestion": 0 }, "scope": "code: note-md-support (re-review after --danger fix)" }
 ]
