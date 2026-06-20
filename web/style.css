@@ -50,50 +50,23 @@ h1 {
   }
 }
 
-.note-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 0.75rem;
-}
-
-/* The title already carries the page's h1 bottom-margin; inside the head row the tabs
-   align to it, so no extra spacing is needed here. */
-.note-tabs {
-  display: flex;
-  gap: 0.3rem;
-}
-
-.note-tabs button {
-  padding: 0.3rem 0.7rem;
-  font-size: 0.85rem;
-}
-
-.note-tabs button[aria-pressed="true"] {
-  background: var(--accent);
-  color: #fff;
-  border-color: var(--accent);
-}
-
-/* The note's two views (editor + preview). By default it is a plain block: the active
-   view is full width and the other is `hidden`, exactly the Edit/Preview geometry.
-   Live mode adds `.is-split` to show both side by side. */
-.note-views.is-split {
+/* The note's two views — editor and live preview — always sit side by side over the same
+   note text. min-width: 0 lets each column shrink instead of overflowing its content. */
+.note-views {
   display: flex;
   gap: 1rem;
 }
 
-/* min-width: 0 lets each column shrink instead of overflowing its content. */
-.note-views.is-split > .note-input,
-.note-views.is-split > .note-preview {
+.note-views > .note-input,
+.note-views > .note-preview {
   flex: 1;
   min-width: 0;
 }
 
-/* On narrow screens (where the outer panes already stack) the Live split would cram two
-   columns into a phone width, so stack the editor above the preview instead. */
+/* On narrow screens (where the outer panes already stack) two columns would cram into a
+   phone width, so stack the editor above the preview instead. */
 @media (max-width: 720px) {
-  .note-views.is-split {
+  .note-views {
     flex-direction: column;
   }
 }
