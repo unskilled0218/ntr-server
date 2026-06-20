@@ -86,7 +86,10 @@ last-write-wins, the same as `PUT /api/raw` for the task file.
 ## WebUI
 
 The page at `/` is split into two panes side by side: the **note** on the left and
-the **todo** on the right (they stack vertically on narrow screens). The note pane is a
+the **todo** on the right (they stack vertically on narrow screens). On wide screens the page
+fills the viewport without scrolling: each pane keeps its chrome fixed — the todo add and
+filter controls and the note status bar stay put — while the task list and the note editor
+scroll internally; on narrow screens the panes stack and the page scrolls normally. The note pane is a
 single **in-place live editor**: one surface where you type raw Markdown over `Note.md` and
 it renders as you type — headings grow, `**bold**` shows bold, `-` lists indent — while the
 syntax markers stay visible (dimmed) so the text is still raw Markdown you can edit. The
