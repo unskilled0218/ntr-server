@@ -10,13 +10,20 @@
     <main>
       <div class="panes">
         <section class="pane note-pane">
-          <h1>note</h1>
+          <div class="note-head">
+            <h1>note</h1>
+            <div class="note-tabs" role="group" aria-label="Note view">
+              <button type="button" id="note-edit-tab" aria-pressed="true">Edit</button>
+              <button type="button" id="note-preview-tab" aria-pressed="false">Preview</button>
+            </div>
+          </div>
           <textarea
             id="note-input"
             class="note-input"
             aria-label="Note (Markdown)"
             placeholder="Notes (Markdown)…"
           ></textarea>
+          <div id="note-preview" class="note-preview markdown-body" hidden></div>
           <div class="note-bar">
             <span id="note-status" class="note-status" role="status"></span>
           </div>
