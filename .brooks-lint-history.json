@@ -21,5 +21,7 @@
   { "date": "2026-06-20", "mode": "PR Review", "score": 99, "findings": { "critical": 0, "warning": 0, "suggestion": 1 }, "scope": "code: note-md-autosave (commit e0efc1e)" },
   { "date": "2026-06-20", "mode": "PR Review", "score": 100, "findings": { "critical": 0, "warning": 0, "suggestion": 0 }, "scope": "code: note-md-autosave (re-review after failed-save retry-loop fix)" },
   { "date": "2026-06-20", "mode": "PR Review", "score": 99, "findings": { "critical": 0, "warning": 0, "suggestion": 1 }, "scope": "plans/note-md-preview.md" },
-  { "date": "2026-06-20", "mode": "PR Review", "score": 100, "findings": { "critical": 0, "warning": 0, "suggestion": 0 }, "scope": "plans/note-md-preview.md (re-review after marker-constant extraction)" }
+  { "date": "2026-06-20", "mode": "PR Review", "score": 100, "findings": { "critical": 0, "warning": 0, "suggestion": 0 }, "scope": "plans/note-md-preview.md (re-review after marker-constant extraction)" },
+  { "date": "2026-06-20", "mode": "PR Review", "score": 99, "findings": { "critical": 0, "warning": 0, "suggestion": 1 }, "scope": "code: note-md-preview (commit aa7ed4c)" },
+  { "date": "2026-06-20", "mode": "PR Review", "score": 100, "findings": { "critical": 0, "warning": 0, "suggestion": 0 }, "scope": "code: note-md-preview (re-review after QUOTE_MARKER extraction)" }
 ]

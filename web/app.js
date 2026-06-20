@@ -555,6 +555,7 @@ async function loadNote() {
 const LIST_ITEM = /^\s*([-*+]|\d+\.)\s+/; // any list item (the leading marker)
 const ORDERED_ITEM = /^\s*\d+\.\s+/; //      an ordered list item specifically
 const FENCE = /^```/; //                     a fenced-code delimiter line
+const QUOTE_MARKER = /^>\s?/; //             a blockquote line (and the prefix to strip)
 
 // Escape the HTML-significant characters so note text can never inject markup into the
 // rendered preview. Every user-supplied run passes through here before it reaches
@@ -610,7 +611,7 @@ function blockKind(line) {
   if (FENCE.test(line)) return "fence";
   if (/^#{1,6}\s/.test(line)) return "heading";
   if (/^(---|\*\*\*|___)\s*$/.test(line)) return "hr";
-  if (/^>\s?/.test(line)) return "quote";
+  if (QUOTE_MARKER.test(line)) return "quote";
   if (LIST_ITEM.test(line)) return "list";
   return "para";
 }
@@ -637,7 +638,7 @@ function takeBlockquote(lines, i) {
   let j = i;
   const buf = [];
   while (j < lines.length && blockKind(lines[j]) === "quote") {
-    buf.push(lines[j].replace(/^>\s?/, ""));
+    buf.push(lines[j].replace(QUOTE_MARKER, ""));
     j += 1;
   }
   const inner = renderInline(escapeHtml(buf.join("\n"))).replace(/\n/g, "<br>");
