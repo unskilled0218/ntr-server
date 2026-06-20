@@ -5,15 +5,21 @@
 // markup and the compose/populate logic. The select itself holds its options and
 // current value, so no separate per-kind selection state is needed.
 const KINDS = {
-  project: { prefix: "+", singular: "project", plural: "Projects" },
-  context: { prefix: "@", singular: "context", plural: "Contexts" },
+  project: { prefix: "+", singular: "project" },
+  context: { prefix: "@", singular: "context" },
 };
 
-// The "add" entry pinned at the bottom of each label select. It is recognised by
+// The "add" entry pinned at the top of each label select. It is recognised by
 // its data-add flag (set in populateLabelSelect), never by this value, so a real
 // label can never be mistaken for it. The value is a validator-forbidden token
 // (`+` is rejected in a real label name) purely as defence-in-depth.
 const ADD_VALUE = "+add";
+
+// Visible text of the empty / no-selection option shared by all three add-form
+// dropdowns (priority, project, context). value="" is the real no-selection
+// state; this is only its label, kept in one place so the wording never drifts
+// between the selects.
+const EMPTY_LABEL = "None";
 
 const state = {
   filter: "all", // all | active | completed
@@ -198,11 +204,12 @@ async function editTask(task) {
   }
 }
 
-// Populate the priority select once: a blank placeholder, then A..C. Only A-C
-// are offered in the picker by product decision; the server still accepts and
-// displays any (A)..(Z) priority on tasks created or edited as raw todo.txt.
+// Populate the priority select once: a "None" no-selection option, then A..C.
+// Only A-C are offered in the picker by product decision; the server still
+// accepts and displays any (A)..(Z) priority on tasks created or edited as raw
+// todo.txt.
 function initPriorityOptions() {
-  els.priority.add(new Option("Priority", ""));
+  els.priority.add(new Option(EMPTY_LABEL, ""));
   const first = "A".charCodeAt(0);
   const last = "C".charCodeAt(0);
   for (let code = first; code <= last; code += 1) {
@@ -211,21 +218,22 @@ function initPriorityOptions() {
   }
 }
 
-// Rebuild one label select's option list: a blank placeholder (text = the field
-// caption, mirroring the Priority select), the sorted label names, then the "add"
-// entry pinned last. The current pick is preserved across reloads only while it
-// still exists, otherwise it falls back to the placeholder. The add entry is
-// flagged with dataset.add so the change handler recognises it without relying on
-// its value; priorLabel[kind] is kept in sync with the surviving selection.
+// Rebuild one label select's option list: the "add" entry pinned first, then the
+// "None" no-selection option, then the sorted label names. The current pick is
+// preserved across reloads only while it still exists, otherwise it falls back to
+// the empty option. The add entry is flagged with dataset.add so the change
+// handler recognises it without relying on its value or position; priorLabel[kind]
+// is kept in sync with the surviving selection. select.value is always set
+// explicitly below, so the add entry being first never makes it the default pick.
 function populateLabelSelect(kind, names) {
   const select = els[kind];
   const previous = select.value;
   select.replaceChildren();
-  select.add(new Option(KINDS[kind].plural, ""));
-  for (const name of [...names].sort()) select.add(new Option(name, name));
   const addOption = new Option(`+ Add ${KINDS[kind].singular}...`, ADD_VALUE);
   addOption.dataset.add = "1";
   select.add(addOption);
+  select.add(new Option(EMPTY_LABEL, ""));
+  for (const name of [...names].sort()) select.add(new Option(name, name));
   select.value = names.has(previous) ? previous : "";
   priorLabel[kind] = select.value;
 }
