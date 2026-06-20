@@ -67,6 +67,10 @@ h1 {
    bottom bar switches between them, and a horizontal swipe (app.js) does the same. The page
    stays one viewport tall (base layout) and the visible pane scrolls internally. */
 @media (max-width: 720px) {
+  main {
+    padding-bottom: 0; /* the bottom-nav sits flush against the viewport edge */
+  }
+
   .pane {
     display: none;
   }
