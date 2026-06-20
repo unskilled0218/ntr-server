@@ -1,39 +1,442 @@
 [
-  { "date": "2026-06-19", "mode": "PR Review", "score": 98, "findings": { "critical": 0, "warning": 0, "suggestion": 2 }, "scope": "plans/project-context-dropdowns.md" },
-  { "date": "2026-06-19", "mode": "PR Review", "score": 98, "findings": { "critical": 0, "warning": 0, "suggestion": 2 }, "scope": "code: web/* (commit f96e80c)" },
-  { "date": "2026-06-19", "mode": "PR Review", "score": 98, "findings": { "critical": 0, "warning": 0, "suggestion": 2 }, "scope": "plans/native-label-selects.md" },
-  { "date": "2026-06-19", "mode": "PR Review", "score": 98, "findings": { "critical": 0, "warning": 0, "suggestion": 2 }, "scope": "code: web/* (commit 65ffb99)" },
-  { "date": "2026-06-19", "mode": "PR Review", "score": 94, "findings": { "critical": 0, "warning": 1, "suggestion": 1 }, "scope": "plans/label-add-modal.md" },
-  { "date": "2026-06-19", "mode": "PR Review", "score": 99, "findings": { "critical": 0, "warning": 0, "suggestion": 1 }, "scope": "plans/label-add-modal.md (re-review)" },
-  { "date": "2026-06-20", "mode": "PR Review", "score": 98, "findings": { "critical": 0, "warning": 0, "suggestion": 2 }, "scope": "code: web/* (commit b0a7937)" },
-  { "date": "2026-06-20", "mode": "PR Review", "score": 99, "findings": { "critical": 0, "warning": 0, "suggestion": 1 }, "scope": "plans/dropdown-menu-cleanup.md" },
-  { "date": "2026-06-20", "mode": "PR Review", "score": 100, "findings": { "critical": 0, "warning": 0, "suggestion": 0 }, "scope": "plans/dropdown-menu-cleanup.md (re-review)" },
-  { "date": "2026-06-20", "mode": "PR Review", "score": 99, "findings": { "critical": 0, "warning": 0, "suggestion": 1 }, "scope": "code: web/* (commit d05e1bb)" },
-  { "date": "2026-06-20", "mode": "PR Review", "score": 99, "findings": { "critical": 0, "warning": 0, "suggestion": 1 }, "scope": "plans/sort-filter-dropdowns.md" },
-  { "date": "2026-06-20", "mode": "PR Review", "score": 100, "findings": { "critical": 0, "warning": 0, "suggestion": 0 }, "scope": "plans/sort-filter-dropdowns.md (re-review)" },
-  { "date": "2026-06-20", "mode": "PR Review", "score": 99, "findings": { "critical": 0, "warning": 0, "suggestion": 1 }, "scope": "code: web/* (commit e320364)" },
-  { "date": "2026-06-20", "mode": "PR Review", "score": 99, "findings": { "critical": 0, "warning": 0, "suggestion": 1 }, "scope": "plans/note-md-support.md" },
-  { "date": "2026-06-20", "mode": "PR Review", "score": 100, "findings": { "critical": 0, "warning": 0, "suggestion": 0 }, "scope": "plans/note-md-support.md (re-review)" },
-  { "date": "2026-06-20", "mode": "PR Review", "score": 98, "findings": { "critical": 0, "warning": 0, "suggestion": 2 }, "scope": "code: note-md-support (commit 0a376b3)" },
-  { "date": "2026-06-20", "mode": "PR Review", "score": 100, "findings": { "critical": 0, "warning": 0, "suggestion": 0 }, "scope": "code: note-md-support (re-review after --danger fix)" },
-  { "date": "2026-06-20", "mode": "PR Review", "score": 99, "findings": { "critical": 0, "warning": 0, "suggestion": 1 }, "scope": "plans/note-md-autosave.md" },
-  { "date": "2026-06-20", "mode": "PR Review", "score": 100, "findings": { "critical": 0, "warning": 0, "suggestion": 0 }, "scope": "plans/note-md-autosave.md (re-review after noteDirty extraction)" },
-  { "date": "2026-06-20", "mode": "PR Review", "score": 99, "findings": { "critical": 0, "warning": 0, "suggestion": 1 }, "scope": "code: note-md-autosave (commit e0efc1e)" },
-  { "date": "2026-06-20", "mode": "PR Review", "score": 100, "findings": { "critical": 0, "warning": 0, "suggestion": 0 }, "scope": "code: note-md-autosave (re-review after failed-save retry-loop fix)" },
-  { "date": "2026-06-20", "mode": "PR Review", "score": 99, "findings": { "critical": 0, "warning": 0, "suggestion": 1 }, "scope": "plans/note-md-preview.md" },
-  { "date": "2026-06-20", "mode": "PR Review", "score": 100, "findings": { "critical": 0, "warning": 0, "suggestion": 0 }, "scope": "plans/note-md-preview.md (re-review after marker-constant extraction)" },
-  { "date": "2026-06-20", "mode": "PR Review", "score": 99, "findings": { "critical": 0, "warning": 0, "suggestion": 1 }, "scope": "code: note-md-preview (commit aa7ed4c)" },
-  { "date": "2026-06-20", "mode": "PR Review", "score": 100, "findings": { "critical": 0, "warning": 0, "suggestion": 0 }, "scope": "code: note-md-preview (re-review after QUOTE_MARKER extraction)" },
-  { "date": "2026-06-20", "mode": "PR Review", "score": 99, "findings": { "critical": 0, "warning": 0, "suggestion": 1 }, "scope": "tasks/11-note-md-live-preview/plan.md" },
-  { "date": "2026-06-20", "mode": "PR Review", "score": 100, "findings": { "critical": 0, "warning": 0, "suggestion": 0 }, "scope": "tasks/11-note-md-live-preview/plan.md (re-review after NOTE_MODES table)" },
-  { "date": "2026-06-20", "mode": "PR Review", "score": 99, "findings": { "critical": 0, "warning": 0, "suggestion": 1 }, "scope": "code: note-md-live-preview (commit f55c90b)" },
-  { "date": "2026-06-20", "mode": "PR Review", "score": 100, "findings": { "critical": 0, "warning": 0, "suggestion": 0 }, "scope": "code: note-md-live-preview (re-review after isSplit extraction)" },
-  { "date": "2026-06-20", "mode": "PR Review", "score": 99, "findings": { "critical": 0, "warning": 0, "suggestion": 1 }, "scope": "tasks/12-note-live-only/plan.md" },
-  { "date": "2026-06-20", "mode": "PR Review", "score": 100, "findings": { "critical": 0, "warning": 0, "suggestion": 0 }, "scope": "tasks/12-note-live-only/plan.md (re-review after removing .note-head wrapper)" },
-  { "date": "2026-06-20", "mode": "PR Review", "score": 100, "findings": { "critical": 0, "warning": 0, "suggestion": 0 }, "scope": "code: note-live-only (commit bb20f87)" },
-  { "date": "2026-06-20", "mode": "PR Review", "score": 98, "findings": { "critical": 0, "warning": 0, "suggestion": 2 }, "scope": "tasks/13-note-inplace-preview/plan.md" },
-  { "date": "2026-06-20", "mode": "PR Review", "score": 100, "findings": { "critical": 0, "warning": 0, "suggestion": 0 }, "scope": "tasks/13-note-inplace-preview/plan.md (re-review after lineLen + inline split)" },
-  { "date": "2026-06-20", "mode": "PR Review", "score": 97, "findings": { "critical": 0, "warning": 0, "suggestion": 3 }, "scope": "code: note-inplace-preview (commit 3d86405)" },
-  { "date": "2026-06-20", "mode": "PR Review", "score": 100, "findings": { "critical": 0, "warning": 0, "suggestion": 0 }, "scope": "tasks/13-note-inplace-preview/review-plan.md (fix plan)" },
-  { "date": "2026-06-20", "mode": "PR Review", "score": 100, "findings": { "critical": 0, "warning": 0, "suggestion": 0 }, "scope": "code: note-inplace-preview (re-review after LINE table + emph helper)" }
+  {
+    "date": "2026-06-19",
+    "mode": "PR Review",
+    "score": 98,
+    "findings": {
+      "critical": 0,
+      "warning": 0,
+      "suggestion": 2
+    },
+    "scope": "plans/project-context-dropdowns.md"
+  },
+  {
+    "date": "2026-06-19",
+    "mode": "PR Review",
+    "score": 98,
+    "findings": {
+      "critical": 0,
+      "warning": 0,
+      "suggestion": 2
+    },
+    "scope": "code: web/* (commit f96e80c)"
+  },
+  {
+    "date": "2026-06-19",
+    "mode": "PR Review",
+    "score": 98,
+    "findings": {
+      "critical": 0,
+      "warning": 0,
+      "suggestion": 2
+    },
+    "scope": "plans/native-label-selects.md"
+  },
+  {
+    "date": "2026-06-19",
+    "mode": "PR Review",
+    "score": 98,
+    "findings": {
+      "critical": 0,
+      "warning": 0,
+      "suggestion": 2
+    },
+    "scope": "code: web/* (commit 65ffb99)"
+  },
+  {
+    "date": "2026-06-19",
+    "mode": "PR Review",
+    "score": 94,
+    "findings": {
+      "critical": 0,
+      "warning": 1,
+      "suggestion": 1
+    },
+    "scope": "plans/label-add-modal.md"
+  },
+  {
+    "date": "2026-06-19",
+    "mode": "PR Review",
+    "score": 99,
+    "findings": {
+      "critical": 0,
+      "warning": 0,
+      "suggestion": 1
+    },
+    "scope": "plans/label-add-modal.md (re-review)"
+  },
+  {
+    "date": "2026-06-20",
+    "mode": "PR Review",
+    "score": 98,
+    "findings": {
+      "critical": 0,
+      "warning": 0,
+      "suggestion": 2
+    },
+    "scope": "code: web/* (commit b0a7937)"
+  },
+  {
+    "date": "2026-06-20",
+    "mode": "PR Review",
+    "score": 99,
+    "findings": {
+      "critical": 0,
+      "warning": 0,
+      "suggestion": 1
+    },
+    "scope": "plans/dropdown-menu-cleanup.md"
+  },
+  {
+    "date": "2026-06-20",
+    "mode": "PR Review",
+    "score": 100,
+    "findings": {
+      "critical": 0,
+      "warning": 0,
+      "suggestion": 0
+    },
+    "scope": "plans/dropdown-menu-cleanup.md (re-review)"
+  },
+  {
+    "date": "2026-06-20",
+    "mode": "PR Review",
+    "score": 99,
+    "findings": {
+      "critical": 0,
+      "warning": 0,
+      "suggestion": 1
+    },
+    "scope": "code: web/* (commit d05e1bb)"
+  },
+  {
+    "date": "2026-06-20",
+    "mode": "PR Review",
+    "score": 99,
+    "findings": {
+      "critical": 0,
+      "warning": 0,
+      "suggestion": 1
+    },
+    "scope": "plans/sort-filter-dropdowns.md"
+  },
+  {
+    "date": "2026-06-20",
+    "mode": "PR Review",
+    "score": 100,
+    "findings": {
+      "critical": 0,
+      "warning": 0,
+      "suggestion": 0
+    },
+    "scope": "plans/sort-filter-dropdowns.md (re-review)"
+  },
+  {
+    "date": "2026-06-20",
+    "mode": "PR Review",
+    "score": 99,
+    "findings": {
+      "critical": 0,
+      "warning": 0,
+      "suggestion": 1
+    },
+    "scope": "code: web/* (commit e320364)"
+  },
+  {
+    "date": "2026-06-20",
+    "mode": "PR Review",
+    "score": 99,
+    "findings": {
+      "critical": 0,
+      "warning": 0,
+      "suggestion": 1
+    },
+    "scope": "plans/note-md-support.md"
+  },
+  {
+    "date": "2026-06-20",
+    "mode": "PR Review",
+    "score": 100,
+    "findings": {
+      "critical": 0,
+      "warning": 0,
+      "suggestion": 0
+    },
+    "scope": "plans/note-md-support.md (re-review)"
+  },
+  {
+    "date": "2026-06-20",
+    "mode": "PR Review",
+    "score": 98,
+    "findings": {
+      "critical": 0,
+      "warning": 0,
+      "suggestion": 2
+    },
+    "scope": "code: note-md-support (commit 0a376b3)"
+  },
+  {
+    "date": "2026-06-20",
+    "mode": "PR Review",
+    "score": 100,
+    "findings": {
+      "critical": 0,
+      "warning": 0,
+      "suggestion": 0
+    },
+    "scope": "code: note-md-support (re-review after --danger fix)"
+  },
+  {
+    "date": "2026-06-20",
+    "mode": "PR Review",
+    "score": 99,
+    "findings": {
+      "critical": 0,
+      "warning": 0,
+      "suggestion": 1
+    },
+    "scope": "plans/note-md-autosave.md"
+  },
+  {
+    "date": "2026-06-20",
+    "mode": "PR Review",
+    "score": 100,
+    "findings": {
+      "critical": 0,
+      "warning": 0,
+      "suggestion": 0
+    },
+    "scope": "plans/note-md-autosave.md (re-review after noteDirty extraction)"
+  },
+  {
+    "date": "2026-06-20",
+    "mode": "PR Review",
+    "score": 99,
+    "findings": {
+      "critical": 0,
+      "warning": 0,
+      "suggestion": 1
+    },
+    "scope": "code: note-md-autosave (commit e0efc1e)"
+  },
+  {
+    "date": "2026-06-20",
+    "mode": "PR Review",
+    "score": 100,
+    "findings": {
+      "critical": 0,
+      "warning": 0,
+      "suggestion": 0
+    },
+    "scope": "code: note-md-autosave (re-review after failed-save retry-loop fix)"
+  },
+  {
+    "date": "2026-06-20",
+    "mode": "PR Review",
+    "score": 99,
+    "findings": {
+      "critical": 0,
+      "warning": 0,
+      "suggestion": 1
+    },
+    "scope": "plans/note-md-preview.md"
+  },
+  {
+    "date": "2026-06-20",
+    "mode": "PR Review",
+    "score": 100,
+    "findings": {
+      "critical": 0,
+      "warning": 0,
+      "suggestion": 0
+    },
+    "scope": "plans/note-md-preview.md (re-review after marker-constant extraction)"
+  },
+  {
+    "date": "2026-06-20",
+    "mode": "PR Review",
+    "score": 99,
+    "findings": {
+      "critical": 0,
+      "warning": 0,
+      "suggestion": 1
+    },
+    "scope": "code: note-md-preview (commit aa7ed4c)"
+  },
+  {
+    "date": "2026-06-20",
+    "mode": "PR Review",
+    "score": 100,
+    "findings": {
+      "critical": 0,
+      "warning": 0,
+      "suggestion": 0
+    },
+    "scope": "code: note-md-preview (re-review after QUOTE_MARKER extraction)"
+  },
+  {
+    "date": "2026-06-20",
+    "mode": "PR Review",
+    "score": 99,
+    "findings": {
+      "critical": 0,
+      "warning": 0,
+      "suggestion": 1
+    },
+    "scope": "tasks/11-note-md-live-preview/plan.md"
+  },
+  {
+    "date": "2026-06-20",
+    "mode": "PR Review",
+    "score": 100,
+    "findings": {
+      "critical": 0,
+      "warning": 0,
+      "suggestion": 0
+    },
+    "scope": "tasks/11-note-md-live-preview/plan.md (re-review after NOTE_MODES table)"
+  },
+  {
+    "date": "2026-06-20",
+    "mode": "PR Review",
+    "score": 99,
+    "findings": {
+      "critical": 0,
+      "warning": 0,
+      "suggestion": 1
+    },
+    "scope": "code: note-md-live-preview (commit f55c90b)"
+  },
+  {
+    "date": "2026-06-20",
+    "mode": "PR Review",
+    "score": 100,
+    "findings": {
+      "critical": 0,
+      "warning": 0,
+      "suggestion": 0
+    },
+    "scope": "code: note-md-live-preview (re-review after isSplit extraction)"
+  },
+  {
+    "date": "2026-06-20",
+    "mode": "PR Review",
+    "score": 99,
+    "findings": {
+      "critical": 0,
+      "warning": 0,
+      "suggestion": 1
+    },
+    "scope": "tasks/12-note-live-only/plan.md"
+  },
+  {
+    "date": "2026-06-20",
+    "mode": "PR Review",
+    "score": 100,
+    "findings": {
+      "critical": 0,
+      "warning": 0,
+      "suggestion": 0
+    },
+    "scope": "tasks/12-note-live-only/plan.md (re-review after removing .note-head wrapper)"
+  },
+  {
+    "date": "2026-06-20",
+    "mode": "PR Review",
+    "score": 100,
+    "findings": {
+      "critical": 0,
+      "warning": 0,
+      "suggestion": 0
+    },
+    "scope": "code: note-live-only (commit bb20f87)"
+  },
+  {
+    "date": "2026-06-20",
+    "mode": "PR Review",
+    "score": 98,
+    "findings": {
+      "critical": 0,
+      "warning": 0,
+      "suggestion": 2
+    },
+    "scope": "tasks/13-note-inplace-preview/plan.md"
+  },
+  {
+    "date": "2026-06-20",
+    "mode": "PR Review",
+    "score": 100,
+    "findings": {
+      "critical": 0,
+      "warning": 0,
+      "suggestion": 0
+    },
+    "scope": "tasks/13-note-inplace-preview/plan.md (re-review after lineLen + inline split)"
+  },
+  {
+    "date": "2026-06-20",
+    "mode": "PR Review",
+    "score": 97,
+    "findings": {
+      "critical": 0,
+      "warning": 0,
+      "suggestion": 3
+    },
+    "scope": "code: note-inplace-preview (commit 3d86405)"
+  },
+  {
+    "date": "2026-06-20",
+    "mode": "PR Review",
+    "score": 100,
+    "findings": {
+      "critical": 0,
+      "warning": 0,
+      "suggestion": 0
+    },
+    "scope": "tasks/13-note-inplace-preview/review-plan.md (fix plan)"
+  },
+  {
+    "date": "2026-06-20",
+    "mode": "PR Review",
+    "score": 100,
+    "findings": {
+      "critical": 0,
+      "warning": 0,
+      "suggestion": 0
+    },
+    "scope": "code: note-inplace-preview (re-review after LINE table + emph helper)"
+  },
+  {
+    "date": "2026-06-20",
+    "mode": "PR Review",
+    "score": 98,
+    "findings": {
+      "critical": 0,
+      "warning": 0,
+      "suggestion": 2
+    },
+    "scope": "tasks/14-no-scroll-panes/plan.md"
+  },
+  {
+    "date": "2026-06-20",
+    "mode": "PR Review",
+    "score": 100,
+    "findings": {
+      "critical": 0,
+      "warning": 0,
+      "suggestion": 0
+    },
+    "scope": "tasks/14-no-scroll-panes/plan.md (re-review after fixed-height markers + 60vh rationale)"
+  },
+  {
+    "date": "2026-06-20",
+    "mode": "PR Review",
+    "score": 100,
+    "findings": {
+      "critical": 0,
+      "warning": 0,
+      "suggestion": 0
+    },
+    "scope": "code: no-scroll-panes (commit 4800599)"
+  }
 ]
