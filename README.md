@@ -79,10 +79,10 @@ tag), and single-select `+project` and `@context` dropdowns — so common fields
 can be set by picking options instead of typing todo.txt syntax. The project and
 context dropdowns are populated from the labels already present in the file (a
 new label appears as an option once a task using it is saved; todo.txt has no
-separate label store), and each shows only its placeholder and "add" entry until
-the file contains at least one label of that kind.
+separate label store), and each shows only its `None` (no-selection) option and
+"add" entry until the file contains at least one label of that kind.
 
-Each project/context dropdown ends with an `+ Add project...` / `+ Add
+Each project/context dropdown begins with an `+ Add project...` / `+ Add
 context...` entry; choosing it opens a small modal with a single text input for a
 new label name. A valid name is staged client-side and selected immediately so it
 can be used on the next task add — it becomes a permanent label the moment a task
