@@ -82,8 +82,10 @@ const els = {
   empty: document.getElementById("empty"),
   error: document.getElementById("error"),
   noteInput: document.getElementById("note-input"),
+  noteViews: document.getElementById("note-views"),
   notePreview: document.getElementById("note-preview"),
   noteEditTab: document.getElementById("note-edit-tab"),
+  noteLiveTab: document.getElementById("note-live-tab"),
   notePreviewTab: document.getElementById("note-preview-tab"),
   noteStatus: document.getElementById("note-status"),
   status: document.getElementById("filter-status"),
@@ -702,18 +704,45 @@ function renderMarkdown(src) {
   return out.join("\n");
 }
 
-// Show one of the note's two views. Entering Preview renders the textarea's CURRENT text
-// (so it always matches what was on screen) into #note-preview; Edit refocuses the
-// textarea. aria-pressed marks the active tab. renderMarkdown's output is already
-// escaped/sanitised, so assigning it to innerHTML is safe.
+// The note's current view; drives whether the live render runs on each keystroke.
+let noteMode = "edit";
+
+// Single source of truth for the note's view modes: each mode's tab button and which of
+// the two views (editor / preview) it shows. setNoteMode, the input handler, and the tab
+// wiring all read from here, so adding or renaming a mode is one edit with no second list
+// (or hand-written boolean) to keep in step. "live" shows both — the split layout — and
+// is the only mode whose preview tracks typing.
+const NOTE_MODES = {
+  edit: { tab: els.noteEditTab, input: true, preview: false },
+  live: { tab: els.noteLiveTab, input: true, preview: true },
+  preview: { tab: els.notePreviewTab, input: false, preview: true },
+};
+
+// Render the textarea's current Markdown into the preview node. renderMarkdown's output
+// is already escaped/sanitised, so assigning it to innerHTML is safe. scrollTop is saved
+// and restored so a live re-render while typing does not jump the preview to the top
+// (on first entry scrollTop is 0, so the save/restore is a no-op there).
+function renderNotePreview() {
+  const { scrollTop } = els.notePreview;
+  els.notePreview.innerHTML = renderMarkdown(els.noteInput.value);
+  els.notePreview.scrollTop = scrollTop;
+}
+
+// Show one of the note's three views, reading visibility from NOTE_MODES so there is no
+// per-mode branching. A mode showing the preview renders the textarea's CURRENT text
+// first (so output matches what is on screen); a mode showing both views is the split
+// (Live) layout; any mode showing the editor focuses it. aria-pressed marks the active
+// tab from the same table.
 function setNoteMode(mode) {
-  const preview = mode === "preview";
-  if (preview) els.notePreview.innerHTML = renderMarkdown(els.noteInput.value);
-  els.noteInput.hidden = preview;
-  els.notePreview.hidden = !preview;
-  els.noteEditTab.setAttribute("aria-pressed", String(!preview));
-  els.notePreviewTab.setAttribute("aria-pressed", String(preview));
-  if (!preview) els.noteInput.focus();
+  noteMode = mode;
+  const view = NOTE_MODES[mode];
+  if (view.preview) renderNotePreview();
+  els.noteInput.hidden = !view.input;
+  els.notePreview.hidden = !view.preview;
+  els.noteViews.classList.toggle("is-split", view.input && view.preview);
+  for (const [m, { tab }] of Object.entries(NOTE_MODES))
+    tab.setAttribute("aria-pressed", String(m === mode));
+  if (view.input) els.noteInput.focus();
 }
 
 els.form.addEventListener("submit", async (e) => {
@@ -761,13 +790,17 @@ els.sort.addEventListener("change", () => {
 els.noteInput.addEventListener("input", () => {
   setNoteStatus("Editing…", false);
   scheduleNoteSave();
+  // Re-render only when the on-screen preview tracks the editor — i.e. the split (Live)
+  // mode, the one mode showing both views. Edit/Preview never enter this branch.
+  const view = NOTE_MODES[noteMode];
+  if (view.input && view.preview) renderNotePreview();
 });
 els.noteInput.addEventListener("blur", flushNote);
 window.addEventListener("pagehide", flushNoteBeacon);
 
-// Edit/Preview toggle: the markup ships in Edit mode, so no startup call is needed.
-els.noteEditTab.addEventListener("click", () => setNoteMode("edit"));
-els.notePreviewTab.addEventListener("click", () => setNoteMode("preview"));
+// Edit/Live/Preview toggle: the markup ships in Edit mode, so no startup call is needed.
+for (const [mode, { tab }] of Object.entries(NOTE_MODES))
+  tab.addEventListener("click", () => setNoteMode(mode));
 
 initPriorityOptions();
 initFilterOptions();
