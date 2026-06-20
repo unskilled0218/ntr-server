@@ -82,7 +82,6 @@ const els = {
   empty: document.getElementById("empty"),
   error: document.getElementById("error"),
   noteInput: document.getElementById("note-input"),
-  notePreview: document.getElementById("note-preview"),
   noteStatus: document.getElementById("note-status"),
   status: document.getElementById("filter-status"),
   sort: document.getElementById("filter-sort"),
@@ -474,11 +473,11 @@ let noteSaveTimer = null;
 // possibly out-of-order, write (single-flight).
 let savingNote = false;
 
-// The one definition of "the note has unsaved edits": the textarea differs from the
+// The one definition of "the note has unsaved edits": the editor's text differs from the
 // last persisted text. Every save path (the flush guard, the post-save re-check, the
 // page-close beacon) asks this, so the dirty rule has a single home.
 function noteDirty() {
-  return els.noteInput.value !== savedNote;
+  return readNoteText(els.noteInput) !== savedNote;
 }
 
 // Single writer for the note status line; `isError` toggles the error styling so a
@@ -503,7 +502,7 @@ async function flushNote() {
   noteSaveTimer = null;
   if (savingNote) return; // single-flight; the in-flight save's re-check will catch up
   if (!noteDirty()) return; // nothing changed
-  const text = els.noteInput.value;
+  const text = readNoteText(els.noteInput);
   savingNote = true;
   setNoteStatus("Saving…", false);
   try {
@@ -528,38 +527,38 @@ async function flushNote() {
 // path will have saved everything earlier, this only covers the last unsaved edit.
 function flushNoteBeacon() {
   if (!noteDirty()) return;
-  putNote(els.noteInput.value, { keepalive: true }).catch(() => {});
+  putNote(readNoteText(els.noteInput), { keepalive: true }).catch(() => {});
 }
 
 async function loadNote() {
   try {
     const text = await fetchNote();
-    els.noteInput.value = text;
     savedNote = text;
-    renderNotePreview(); // populate the always-on preview before the first keystroke
+    setEditorText(text, null); // render the loaded note in place; no caret to restore yet
     setNoteStatus("", false); // freshly loaded: clean, no message
   } catch (err) {
     setNoteStatus(`Could not load note: ${err.message}`, true);
   }
 }
 
-// --- Markdown preview (a small, dependency-free, intentionally-subset renderer) ---
-// The note is stored and served as raw Markdown; the live preview beside the editor
-// renders it client-side the way Obsidian's reading view does. Everything below
-// renderMarkdown is pure (string in, HTML string out) so it stays trivially
-// reasoned-about and away from the DOM.
+// --- In-place live Markdown editor (single contenteditable surface) ---
+// The note is stored and served as raw Markdown and edited in place: the editor IS the
+// preview. highlightMarkdown wraps each character of the source in styling spans WITHOUT
+// adding, removing, or reordering a character, so the editor's text content stays exactly
+// the raw Markdown (markers kept, just dimmed). Everything below highlightMarkdown is pure
+// (string in, HTML string out); the text/caret helpers are the only DOM-touching code.
 
-// Block line-patterns needed in more than one place, named once so each "what marks this
-// block" decision has a single home. None carry the `g` flag, so reusing them with
-// `.test` across the parse loop is stateless and safe.
-const LIST_ITEM = /^\s*([-*+]|\d+\.)\s+/; // any list item (the leading marker)
-const ORDERED_ITEM = /^\s*\d+\.\s+/; //      an ordered list item specifically
-const FENCE = /^```/; //                     a fenced-code delimiter line
-const QUOTE_MARKER = /^>\s?/; //             a blockquote line (and the prefix to strip)
+// Block line-patterns named once so each "what marks this block" decision has a single
+// home. None carry the `g` flag, so reusing them with `.test`/`.match` is stateless.
+const LIST_ITEM = /^(\s*)([-*+]|\d+\.)(\s+)(.*)$/; // leading indent, bullet, gap, text
+const ORDERED_ITEM = /^\s*\d+\.\s+/; //              an ordered list item specifically
+const FENCE = /^```/; //                             a fenced-code delimiter line
+const QUOTE_MARKER = /^(>\s?)(.*)$/; //              a blockquote line: marker, then text
+const HEADING = /^(#{1,6}\s+)(.*)$/; //              heading: hashes+gap marker, then text
 
-// Escape the HTML-significant characters so note text can never inject markup into the
-// rendered preview. Every user-supplied run passes through here before it reaches
-// innerHTML; only the tags this file emits are literal.
+// Escape the HTML-significant characters so note text can never inject markup when it
+// becomes innerHTML. Because the browser decodes these entities back in textContent
+// (&gt; -> >), escaping preserves the character count — the line invariant still holds.
 function escapeHtml(s) {
   return s
     .replace(/&/g, "&amp;")
@@ -569,149 +568,187 @@ function escapeHtml(s) {
     .replace(/'/g, "&#39;");
 }
 
-// Allow only safe link targets — http(s), mailto, and relative/anchor links. Anything
-// else (notably javascript:) collapses to "#", so a crafted link cannot run script.
-function safeHref(url) {
-  const u = url.trim();
-  if (/^(https?:|mailto:)/i.test(u)) return u;
-  if (/^[/#.]/.test(u)) return u; // relative path or in-page anchor
-  return "#";
-}
-
-// Links, then bold, then italic, on a non-code escaped run. Links resolve through
-// safeHref and open in a new tab with noopener; bold runs before italic so ** is not
-// consumed by the single-* rule.
-function formatText(s) {
-  return s
-    .replace(
-      /\[([^\]]+)\]\(([^)]+)\)/g,
-      (_, t, u) => `<a href="${safeHref(u)}" target="_blank" rel="noopener noreferrer">${t}</a>`,
-    )
-    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
-    .replace(/__([^_]+)__/g, "<strong>$1</strong>")
-    .replace(/\*([^*]+)\*/g, "<em>$1</em>")
-    .replace(/_([^_]+)_/g, "<em>$1</em>");
-}
-
-// Inline emphasis/links/code for one already-escaped text run. Splitting on backtick
-// code spans (odd indices) keeps code literal; even indices get the rest of the inline
-// formatting.
-function renderInline(escaped) {
-  return escaped
-    .split(/`([^`]+)`/)
-    .map((part, i) => (i % 2 ? `<code>${part}</code>` : formatText(part)))
-    .join("");
-}
-
-// Classify the block a line begins — the single source of "what kind of line is this".
-// The render loop dispatches on it and takeParagraph stops when a line stops being
-// "para", so the block-detection patterns are never duplicated.
+// Classify the block a line begins — the single source of "what kind of line is this",
+// reused by highlightMarkdown. LIST_ITEM/QUOTE_MARKER/HEADING also capture their parts,
+// but a `.test` here only asks the yes/no question.
 function blockKind(line) {
   if (line.trim() === "") return "blank";
   if (FENCE.test(line)) return "fence";
-  if (/^#{1,6}\s/.test(line)) return "heading";
+  if (HEADING.test(line)) return "heading";
   if (/^(---|\*\*\*|___)\s*$/.test(line)) return "hr";
-  if (QUOTE_MARKER.test(line)) return "quote";
+  if (QUOTE_MARKER.test(line) && line.startsWith(">")) return "quote";
   if (LIST_ITEM.test(line)) return "list";
   return "para";
 }
 
-function takeHeading(lines, i) {
-  const [, hashes, text] = lines[i].match(/^(#{1,6})\s+(.*)$/);
-  const level = hashes.length;
-  return { html: `<h${level}>${renderInline(escapeHtml(text))}</h${level}>`, next: i + 1 };
+// A dimmed, kept marker (e.g. `#`, `**`, `>`); the one place marker spans are built.
+const mark = (s) => `<span class="md-mark">${s}</span>`;
+
+// Wrap emphasis and links on one already-escaped, non-code run, re-emitting every original
+// marker character inside an .md-mark span so textContent === the source run. Order mirrors
+// task 10's formatText (links, then bold, then italic) so ** is not eaten by the single-*
+// rule; every branch preserves characters, so a mis-paired marker is at worst cosmetic.
+function formatInline(run) {
+  return run
+    .replace(
+      /\[([^\]]+)\]\(([^)]+)\)/g,
+      (_, t, u) => `${mark("[")}<span class="md-link">${t}</span>${mark("](")}<span class="md-url">${u}</span>${mark(")")}`,
+    )
+    .replace(/\*\*([^*]+)\*\*/g, (_, t) => `${mark("**")}<span class="md-strong">${t}</span>${mark("**")}`)
+    .replace(/__([^_]+)__/g, (_, t) => `${mark("__")}<span class="md-strong">${t}</span>${mark("__")}`)
+    .replace(/\*([^*]+)\*/g, (_, t) => `${mark("*")}<span class="md-em">${t}</span>${mark("*")}`)
+    .replace(/_([^_]+)_/g, (_, t) => `${mark("_")}<span class="md-em">${t}</span>${mark("_")}`);
 }
 
-function takeFence(lines, i) {
-  let j = i + 1;
-  const body = [];
-  while (j < lines.length && !FENCE.test(lines[j])) {
-    body.push(lines[j]);
-    j += 1;
+// Inline highlight of one already-escaped run: partition `code` spans (odd segments) from
+// the rest. Code keeps its backticks (dimmed) and is not emphasis-formatted; non-code
+// segments go to formatInline. Mirrors task 10's renderInline split, markers kept.
+function highlightInline(escaped) {
+  return escaped
+    .split(/(`[^`]+`)/)
+    .map((part, i) =>
+      i % 2 ? `${mark("`")}<span class="md-code-inline">${part.slice(1, -1)}</span>${mark("`")}` : formatInline(part),
+    )
+    .join("");
+}
+
+// One source line -> one block <div class="md-line …">. The div's textContent equals the
+// source line exactly (markers kept), so the lines join back to the raw Markdown. An empty
+// line becomes <br> so it keeps height and stays selectable. `kind` is precomputed by
+// highlightMarkdown (it carries fenced-code state across lines); code lines are literal.
+function highlightLine(line, kind) {
+  if (kind === "blank") return `<div class="md-line"><br></div>`;
+  if (kind === "code") {
+    const body = escapeHtml(line);
+    return `<div class="md-line md-code">${body === "" ? "<br>" : body}</div>`;
   }
-  if (j < lines.length) j += 1; // consume the closing fence
-  // Code is escaped but NOT inline-formatted — it is literal.
-  return { html: `<pre><code>${escapeHtml(body.join("\n"))}</code></pre>`, next: j };
-}
-
-function takeBlockquote(lines, i) {
-  let j = i;
-  const buf = [];
-  while (j < lines.length && blockKind(lines[j]) === "quote") {
-    buf.push(lines[j].replace(QUOTE_MARKER, ""));
-    j += 1;
+  if (kind === "hr") return `<div class="md-line md-hr">${mark(escapeHtml(line))}</div>`;
+  if (kind === "heading") {
+    const [, marker, text] = line.match(HEADING);
+    const level = marker.trim().length; // number of # characters
+    return `<div class="md-line md-h${level}">${mark(escapeHtml(marker))}${highlightInline(escapeHtml(text))}</div>`;
   }
-  const inner = renderInline(escapeHtml(buf.join("\n"))).replace(/\n/g, "<br>");
-  return { html: `<blockquote>${inner}</blockquote>`, next: j };
-}
-
-function takeList(lines, i) {
-  const ordered = ORDERED_ITEM.test(lines[i]);
-  const items = [];
-  let j = i;
-  // One list = consecutive list lines of the same kind (ordered vs unordered); a switch
-  // starts a new list. One level only — indentation is not nested.
-  while (j < lines.length && blockKind(lines[j]) === "list" && ORDERED_ITEM.test(lines[j]) === ordered) {
-    const text = lines[j].replace(LIST_ITEM, "");
-    items.push(`<li>${renderInline(escapeHtml(text))}</li>`);
-    j += 1;
+  if (kind === "quote") {
+    const [, marker, text] = line.match(QUOTE_MARKER);
+    return `<div class="md-line md-quote">${mark(escapeHtml(marker))}${highlightInline(escapeHtml(text))}</div>`;
   }
-  const tag = ordered ? "ol" : "ul";
-  return { html: `<${tag}>${items.join("")}</${tag}>`, next: j };
-}
-
-function takeParagraph(lines, i) {
-  let j = i;
-  const buf = [];
-  while (j < lines.length && blockKind(lines[j]) === "para") {
-    buf.push(lines[j]);
-    j += 1;
+  if (kind === "list") {
+    const [, indent, bullet, gap, text] = line.match(LIST_ITEM);
+    return `<div class="md-line md-li">${escapeHtml(indent)}${mark(escapeHtml(bullet + gap))}${highlightInline(escapeHtml(text))}</div>`;
   }
-  const text = renderInline(escapeHtml(buf.join("\n"))).replace(/\n/g, "<br>");
-  return { html: `<p>${text}</p>`, next: j };
+  return `<div class="md-line">${highlightInline(escapeHtml(line))}</div>`;
 }
 
-// Block consumers keyed by blockKind, so renderMarkdown stays a flat dispatch.
-const TAKE = {
-  fence: takeFence,
-  heading: takeHeading,
-  hr: (lines, i) => ({ html: "<hr>", next: i + 1 }),
-  quote: takeBlockquote,
-  list: takeList,
-  para: takeParagraph,
-};
-
-// Render a Markdown subset to an HTML string. Supported: headings (#..######), bold,
-// italic, inline code, fenced code blocks, blockquotes, unordered/ordered lists (one
-// level), horizontal rules, links, and paragraphs with single-line breaks. Unsupported
-// constructs (tables, images, nested lists, raw HTML) render as their literal text.
-function renderMarkdown(src) {
+// Render the raw Markdown to the editor's HTML: one block <div> per source line, every
+// character preserved. Fenced-code state is tracked across lines so a fence body styles as
+// code regardless of its content. Supported subset matches task 10 (headings, bold/italic,
+// inline and fenced code, one-level lists, blockquotes, rules, links); anything else is
+// shown as its literal (dimmed where it looks like a marker) text. Used only by setEditorText.
+function highlightMarkdown(src) {
   const lines = src.replace(/\r\n?/g, "\n").split("\n");
-  const out = [];
-  let i = 0;
-  while (i < lines.length) {
-    const kind = blockKind(lines[i]);
-    if (kind === "blank") {
-      i += 1;
-      continue;
-    }
-    const block = TAKE[kind](lines, i);
-    out.push(block.html);
-    i = block.next;
-  }
-  return out.join("\n");
+  let inFence = false;
+  return lines
+    .map((line) => {
+      const fence = FENCE.test(line);
+      const kind = inFence || fence ? "code" : blockKind(line);
+      if (fence) inFence = !inFence;
+      return highlightLine(line, kind);
+    })
+    .join("");
 }
 
-// Render the textarea's current Markdown into the preview node. renderMarkdown's output
-// is already escaped/sanitised, so assigning it to innerHTML is safe. scrollTop is saved
-// and restored so a live re-render while typing does not jump the preview to the top
-// (on first entry scrollTop is 0, so the save/restore is a no-op there). The editor and
-// this preview are always on screen side by side, so this is called once on load and on
-// every keystroke — there is no view mode to gate it.
-function renderNotePreview() {
-  const { scrollTop } = els.notePreview;
-  els.notePreview.innerHTML = renderMarkdown(els.noteInput.value);
-  els.notePreview.scrollTop = scrollTop;
+// THE LINE INVARIANT (one home for the "lines join with a single \n" decision): the
+// editor's logical text is each direct-child line's textContent joined by exactly one
+// "\n". readNoteText performs that join; getCaret/setCaret count this same per-line length
+// via lineLen, so they are exact inverses of the join and cannot drift. Change the
+// separator here and the caret math follows from lineLen — there is no second copy.
+const lineLen = (line) => line.textContent.length + 1; // +1 = the joining "\n"
+
+// The editor's logical text — the raw Markdown, since highlighting only wraps characters,
+// never changes them. What autosave reads and what the caret offsets count against.
+function readNoteText(root) {
+  return Array.from(root.children)
+    .map((line) => line.textContent)
+    .join("\n");
+}
+
+// Characters before the caret, counting one "\n" per line boundary — the inverse of the
+// readNoteText join, so an offset survives a re-render unchanged. null when the caret is
+// not in the editor (nothing to restore).
+function getCaret(root) {
+  const sel = window.getSelection();
+  if (!sel.rangeCount) return null;
+  const range = sel.getRangeAt(0);
+  if (!root.contains(range.startContainer)) return null;
+  let offset = 0;
+  for (const line of root.children) {
+    if (line === range.startContainer || line.contains(range.startContainer)) {
+      const within = document.createRange();
+      within.setStart(line, 0);
+      within.setEnd(range.startContainer, range.startOffset);
+      return offset + within.toString().length; // no block boundaries inside a line
+    }
+    offset += lineLen(line); // same per-line length the join implies (THE LINE INVARIANT)
+  }
+  return offset;
+}
+
+// Put the caret at character offset `pos` within `line`, walking its descendant text nodes.
+// An empty line (just <br>) has no text node, so the caret collapses to the line itself.
+function placeInLine(line, pos) {
+  const sel = window.getSelection();
+  const range = document.createRange();
+  const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
+  let acc = 0;
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    if (acc + node.length >= pos) {
+      range.setStart(node, pos - acc);
+      range.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(range);
+      return;
+    }
+    acc += node.length;
+  }
+  range.selectNodeContents(line);
+  range.collapse(false); // end of an empty/short line
+  sel.removeAllRanges();
+  sel.addRange(range);
+}
+
+// Place the caret at logical offset `pos`, finding its line then the spot within it.
+function setCaret(root, pos) {
+  for (const line of root.children) {
+    if (pos <= line.textContent.length) return placeInLine(line, pos);
+    pos -= lineLen(line); // step over this line and its joining "\n" (THE LINE INVARIANT)
+  }
+  if (root.lastElementChild) placeInLine(root.lastElementChild, root.lastElementChild.textContent.length);
+}
+
+// The single write path: render `text` into the editor and (optionally) restore the caret
+// to character offset `caret`. Load, every keystroke, Enter, and paste all go through here,
+// so "what the editor shows" and "where the caret is" have one home. The is-empty class
+// drives the CSS placeholder (a contenteditable is never CSS :empty once it holds a line).
+function setEditorText(text, caret) {
+  els.noteInput.innerHTML = highlightMarkdown(text);
+  els.noteInput.classList.toggle("is-empty", text === "");
+  if (caret != null) setCaret(els.noteInput, caret);
+}
+
+// Re-highlight in place, preserving the caret: read the current text, re-render, restore.
+function rerenderNote() {
+  setEditorText(readNoteText(els.noteInput), getCaret(els.noteInput));
+}
+
+// Insert `insert` at the caret, operating on the logical text so the DOM stays flat (one
+// div per line). Used by Enter ("\n") and paste (clipboard text/plain), the two structural
+// edits the browser would otherwise turn into nested blocks.
+function spliceNote(insert) {
+  const text = readNoteText(els.noteInput);
+  const at = getCaret(els.noteInput) ?? text.length;
+  setEditorText(text.slice(0, at) + insert + text.slice(at), at + insert.length);
+  setNoteStatus("Editing…", false);
+  scheduleNoteSave();
 }
 
 els.form.addEventListener("submit", async (e) => {
@@ -754,13 +791,39 @@ els.sort.addEventListener("change", () => {
   render();
 });
 
-// Autosave: typing shows "Editing…" and (re)arms the debounce; leaving the field
-// flushes at once; closing the page flushes best-effort so the last edit survives.
+// True between compositionstart/end so we don't re-render mid-IME and drop or duplicate
+// the characters being composed (CJK, accents). The highlight refreshes once on commit.
+let composingNote = false;
+els.noteInput.addEventListener("compositionstart", () => {
+  composingNote = true;
+});
+els.noteInput.addEventListener("compositionend", () => {
+  composingNote = false;
+  rerenderNote();
+});
+
+// Autosave: typing shows "Editing…" and (re)arms the debounce; leaving the field flushes
+// at once; closing the page flushes best-effort so the last edit survives. Each keystroke
+// also re-highlights in place (caret preserved), so the editor renders as you type.
 els.noteInput.addEventListener("input", () => {
   setNoteStatus("Editing…", false);
   scheduleNoteSave();
-  // The preview is always on screen beside the editor, so mirror it on every keystroke.
-  renderNotePreview();
+  if (!composingNote) rerenderNote();
+});
+
+// Enter and paste are reimplemented on the logical text so the DOM stays flat (one div per
+// line): Enter splices a "\n"; paste splices the plain-text clipboard, which also keeps any
+// pasted rich HTML out of the editor. Ordinary typing/deletion is left to the browser
+// (native caret, IME, undo) and re-highlighted by the input handler above.
+els.noteInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    spliceNote("\n");
+  }
+});
+els.noteInput.addEventListener("paste", (e) => {
+  e.preventDefault();
+  spliceNote(e.clipboardData.getData("text/plain"));
 });
 els.noteInput.addEventListener("blur", flushNote);
 window.addEventListener("pagehide", flushNoteBeacon);

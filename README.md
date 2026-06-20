@@ -87,13 +87,14 @@ last-write-wins, the same as `PUT /api/raw` for the task file.
 
 The page at `/` is split into two panes side by side: the **note** on the left and
 the **todo** on the right (they stack vertically on narrow screens). The note pane is a
-single **live** view: a raw-Markdown editor over `Note.md` and its rendered preview sit
-side by side over the same text, and the preview updates as you type (Notion/Obsidian-style
-live preview; the two columns stack on narrow screens). The client-side renderer supports a
-practical subset — headings, bold/italic, inline and fenced code, ordered and unordered
-lists (one level), blockquotes, horizontal rules, and links; unsupported syntax (tables,
-images, nested lists, raw HTML) shows as literal text. The rendering is purely a view: the
-stored file stays raw Markdown.
+single **in-place live editor**: one surface where you type raw Markdown over `Note.md` and
+it renders as you type — headings grow, `**bold**` shows bold, `-` lists indent — while the
+syntax markers stay visible (dimmed) so the text is still raw Markdown you can edit. The
+client-side renderer supports a practical subset — headings, bold/italic, inline and fenced
+code, ordered and unordered lists (one level), blockquotes, horizontal rules, and links;
+unsupported syntax (tables, images, nested lists, raw HTML) shows as literal text. The
+rendering is purely a view: the stored file stays raw Markdown (the editor's text is exactly
+what is saved).
 
 The editor **auto-saves**: there is no Save button. Edits are written shortly after you
 stop typing (a short debounce), immediately when you leave the field, and best-effort
