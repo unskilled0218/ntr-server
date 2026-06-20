@@ -89,6 +89,16 @@ can be used on the next task add — it becomes a permanent label the moment a t
 using it is saved (todo.txt has no place to persist a label that no task uses, so
 a staged-but-unused name simply disappears on reload).
 
+Beneath the add form a row of dropdowns filters and sorts the list. A **Status**
+dropdown (`All` / `Active` / `Completed`) filters by completion, and **Project**
+and **Context** dropdowns — populated from the labels already in the file, each
+with an `All projects` / `All contexts` option — narrow the list to one label
+(both combine with AND). These three drive the server's `completed`, `project`,
+and `context` query params. A **Sort** dropdown reorders the list in the browser
+(no server round-trip): `File order` (the default, the server's order),
+`Priority`, `Due date`, `Created`, and `A-Z`; every key sorts ascending, sends
+tasks missing that field to the bottom, and breaks ties by file order.
+
 Two picker limits are UI-only and do not restrict the data model. The priority
 picker offers `A`–`C`, and the project/context dropdowns set at most one label
 each. Tasks created or edited as raw todo.txt (via the edit prompt or

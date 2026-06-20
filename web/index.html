@@ -56,10 +56,22 @@
       </dialog>
 
       <div id="filters">
-        <button data-filter="all" class="active">All</button>
-        <button data-filter="active">Active</button>
-        <button data-filter="completed">Completed</button>
-        <input id="tag-filter" type="text" placeholder="filter +project or @context" aria-label="Tag filter" />
+        <label>
+          Status
+          <select id="filter-status" aria-label="Status filter"></select>
+        </label>
+        <label>
+          Project
+          <select id="filter-project" aria-label="Project filter"></select>
+        </label>
+        <label>
+          Context
+          <select id="filter-context" aria-label="Context filter"></select>
+        </label>
+        <label>
+          Sort
+          <select id="filter-sort" aria-label="Sort order"></select>
+        </label>
       </div>
 
       <ul id="tasks"></ul>

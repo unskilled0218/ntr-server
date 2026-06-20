@@ -22,8 +22,33 @@ const ADD_VALUE = "+add";
 const EMPTY_LABEL = "None";
 
 const state = {
-  filter: "all", // all | active | completed
-  tag: "",
+  status: "all", // all | active | completed (-> completed query param)
+  project: "", // "" = any project, else an exact project name
+  context: "", // "" = any context, else an exact context name
+  sort: "file", // key into SORTS
+};
+
+// Status filter options keyed by their <select> value. `completed` is the query
+// param the option maps to (null = omit it), kept beside the label so buildQuery
+// never re-decides what a status means (same shape as SORTS: label + behavior).
+const STATUSES = {
+  all: { label: "All", completed: null },
+  active: { label: "Active", completed: false },
+  completed: { label: "Completed", completed: true },
+};
+
+// Client-side sort orders. compare:null keeps the server's file order. Every
+// comparator sorts ascending and sends tasks missing the key to the bottom
+// (cmpMissingLast); JS's stable sort then keeps file order among ties.
+const SORTS = {
+  file: { label: "File order", compare: null },
+  priority: { label: "Priority", compare: (a, b) => cmpMissingLast(a.priority, b.priority) },
+  due: { label: "Due date", compare: (a, b) => cmpMissingLast(a.tags.due, b.tags.due) },
+  created: { label: "Created", compare: (a, b) => cmpMissingLast(a.creation_date, b.creation_date) },
+  alpha: {
+    label: "A-Z",
+    compare: (a, b) => a.description.localeCompare(b.description, undefined, { sensitivity: "base" }),
+  },
 };
 
 // Labels created in the modal but not yet attached to any task. todo.txt has no
@@ -52,14 +77,22 @@ const els = {
   list: document.getElementById("tasks"),
   empty: document.getElementById("empty"),
   error: document.getElementById("error"),
-  tagFilter: document.getElementById("tag-filter"),
-  filterButtons: Array.from(document.querySelectorAll("#filters button[data-filter]")),
+  status: document.getElementById("filter-status"),
+  sort: document.getElementById("filter-sort"),
   modal: document.getElementById("label-modal"),
   modalForm: document.getElementById("label-form"),
   modalTitle: document.getElementById("label-modal-title"),
   modalInput: document.getElementById("label-input"),
   modalError: document.getElementById("label-error"),
   modalCancel: document.getElementById("label-cancel"),
+};
+
+// Filter label selects keyed by kind name, parallel to how els[kind] keys the
+// add-form label selects, so the populate/wire loops can read filterEls[kind]
+// without a per-kind branch.
+const filterEls = {
+  project: document.getElementById("filter-project"),
+  context: document.getElementById("filter-context"),
 };
 
 function showError(message) {
@@ -90,13 +123,31 @@ async function api(method, path, body) {
 
 function buildQuery() {
   const params = new URLSearchParams();
-  if (state.filter === "active") params.set("completed", "false");
-  if (state.filter === "completed") params.set("completed", "true");
-  const tag = state.tag.trim();
-  if (tag.startsWith("+")) params.set("project", tag.slice(1));
-  else if (tag.startsWith("@")) params.set("context", tag.slice(1));
+  const { completed } = STATUSES[state.status];
+  if (completed !== null) params.set("completed", String(completed));
+  if (state.project) params.set("project", state.project);
+  if (state.context) params.set("context", state.context);
   const qs = params.toString();
   return qs ? `/api/tasks?${qs}` : "/api/tasks";
+}
+
+// Compare two optional sort keys ascending, with absent values (null/undefined)
+// always ordering after present ones — so "no priority" / "no due date" sink to
+// the bottom. ISO date strings and single-char priorities compare correctly with
+// <, so no parsing is needed.
+function cmpMissingLast(a, b) {
+  if (a == null && b == null) return 0;
+  if (a == null) return 1;
+  if (b == null) return -1;
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+// Return the tasks in the order selected by the Sort dropdown. file order is a
+// no-op (the server already returns file order); other keys sort a copy so the
+// fetched array is never mutated.
+function sortTasks(tasks) {
+  const compare = SORTS[state.sort].compare;
+  return compare ? [...tasks].sort(compare) : tasks;
 }
 
 function renderMeta(task) {
@@ -159,12 +210,20 @@ function taskElement(task) {
   return li;
 }
 
+// Most recent fetch, kept so a sort change can re-render without refetching (sort
+// is client-side; only filter changes need a new query).
+let lastTasks = [];
+
+function render() {
+  els.list.replaceChildren(...sortTasks(lastTasks).map(taskElement));
+  els.empty.hidden = lastTasks.length !== 0;
+}
+
 async function refresh() {
   showError("");
   try {
-    const tasks = await api("GET", buildQuery());
-    els.list.replaceChildren(...tasks.map(taskElement));
-    els.empty.hidden = tasks.length !== 0;
+    lastTasks = await api("GET", buildQuery());
+    render();
   } catch (err) {
     showError(`Could not load tasks: ${err.message}`);
   }
@@ -218,6 +277,17 @@ function initPriorityOptions() {
   }
 }
 
+// Populate the Status and Sort dropdowns from their config maps and seed each
+// filter label select with just its "all" option, so none of the filter selects
+// is an empty <select> before the async loadLabels fills in the real labels.
+function initFilterOptions() {
+  for (const [value, s] of Object.entries(STATUSES)) els.status.add(new Option(s.label, value));
+  for (const [key, s] of Object.entries(SORTS)) els.sort.add(new Option(s.label, key));
+  els.status.value = state.status;
+  els.sort.value = state.sort;
+  for (const kind of Object.keys(KINDS)) populateFilterSelect(kind, new Set());
+}
+
 // Rebuild one label select's option list: the "add" entry pinned first, then the
 // "None" no-selection option, then the sorted label names. The current pick is
 // preserved across reloads only while it still exists, otherwise it falls back to
@@ -238,6 +308,23 @@ function populateLabelSelect(kind, names) {
   priorLabel[kind] = select.value;
 }
 
+// Rebuild one filter label select from the labels currently in the store. Unlike
+// the add-form select it has no "add" entry and no staged labels (you can only
+// filter by a label some task actually has) — just an "all" option, then the
+// sorted names. The active choice is kept across reloads while it still exists; if
+// its label is gone the select falls back to "all" and the matching filter state is
+// cleared so the dropdown and the query never disagree.
+function populateFilterSelect(kind, names) {
+  const select = filterEls[kind];
+  const previous = select.value;
+  select.replaceChildren();
+  select.add(new Option(`All ${KINDS[kind].singular}s`, ""));
+  for (const name of [...names].sort()) select.add(new Option(name, name));
+  const kept = names.has(previous) ? previous : "";
+  select.value = kept;
+  state[kind] = kept;
+}
+
 // Refresh both label selects from the labels currently in the store, unioned with
 // any client-staged labels not yet on a task. Options are best-effort: a failure
 // here leaves the form usable, the selects just keep their current options. A
@@ -255,8 +342,10 @@ async function loadLabels() {
     showError(`Could not load label suggestions: ${err.message}`);
     return;
   }
-  for (const kind of Object.keys(KINDS))
+  for (const kind of Object.keys(KINDS)) {
     populateLabelSelect(kind, new Set([...server[kind], ...staged[kind]]));
+    populateFilterSelect(kind, server[kind]);
+  }
 }
 
 // Validate a label name typed in the modal. Pure: no DOM, no side effects, so it
@@ -368,21 +457,23 @@ els.modalForm.addEventListener("submit", (e) => {
 });
 els.modalCancel.addEventListener("click", () => els.modal.close());
 
-els.filterButtons.forEach((btn) => {
-  btn.addEventListener("click", () => {
-    state.filter = btn.dataset.filter;
-    els.filterButtons.forEach((b) => b.classList.toggle("active", b === btn));
+// Status and the label filters change the server query, so they refetch; the sort
+// is client-side, so it only re-renders the already-fetched list.
+els.status.addEventListener("change", () => {
+  state.status = els.status.value;
+  refresh();
+});
+for (const kind of Object.keys(KINDS))
+  filterEls[kind].addEventListener("change", () => {
+    state[kind] = filterEls[kind].value;
     refresh();
   });
-});
-
-let tagTimer = null;
-els.tagFilter.addEventListener("input", () => {
-  state.tag = els.tagFilter.value;
-  clearTimeout(tagTimer);
-  tagTimer = setTimeout(refresh, 200);
+els.sort.addEventListener("change", () => {
+  state.sort = els.sort.value;
+  render();
 });
 
 initPriorityOptions();
+initFilterOptions();
 refresh();
 loadLabels();
