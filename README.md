@@ -86,15 +86,14 @@ last-write-wins, the same as `PUT /api/raw` for the task file.
 ## WebUI
 
 The page at `/` is split into two panes side by side: the **note** on the left and
-the **todo** on the right (they stack vertically on narrow screens). The note pane
-has an **Edit / Live / Preview** toggle: Edit is a plain editor over the raw `Note.md`
-text, Preview renders that Markdown full-width (Obsidian's reading-view model), and Live
-shows the editor and the rendered preview side by side, updating as you type
-(Notion/Obsidian-style live preview; the columns stack on narrow screens). All three use
-the same client-side renderer, which supports a practical subset — headings, bold/italic,
-inline and fenced code, ordered and unordered lists (one level), blockquotes, horizontal
-rules, and links; unsupported syntax (tables, images, nested lists, raw HTML) shows as
-literal text. The rendering is purely a view: the stored file stays raw Markdown.
+the **todo** on the right (they stack vertically on narrow screens). The note pane is a
+single **live** view: a raw-Markdown editor over `Note.md` and its rendered preview sit
+side by side over the same text, and the preview updates as you type (Notion/Obsidian-style
+live preview; the two columns stack on narrow screens). The client-side renderer supports a
+practical subset — headings, bold/italic, inline and fenced code, ordered and unordered
+lists (one level), blockquotes, horizontal rules, and links; unsupported syntax (tables,
+images, nested lists, raw HTML) shows as literal text. The rendering is purely a view: the
+stored file stays raw Markdown.
 
 The editor **auto-saves**: there is no Save button. Edits are written shortly after you
 stop typing (a short debounce), immediately when you leave the field, and best-effort
