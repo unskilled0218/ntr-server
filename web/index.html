@@ -40,6 +40,21 @@
         </div>
       </form>
 
+      <dialog id="label-modal">
+        <form id="label-form" autocomplete="off">
+          <h2 id="label-modal-title">Add project</h2>
+          <label>
+            Name
+            <input id="label-input" type="text" aria-label="New label name" />
+          </label>
+          <p id="label-error" class="modal-error" role="alert" hidden></p>
+          <div class="modal-actions">
+            <button type="button" id="label-cancel">Cancel</button>
+            <button type="submit">Add</button>
+          </div>
+        </form>
+      </dialog>
+
       <div id="filters">
         <button data-filter="all" class="active">All</button>
         <button data-filter="active">Active</button>
