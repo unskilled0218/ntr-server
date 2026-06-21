@@ -570,5 +570,38 @@
       "suggestion": 0
     },
     "scope": "tasks/17-note-conflict/plan.md (re-review after rebase->in-sync rename)"
+  },
+  {
+    "date": "2026-06-21",
+    "mode": "PR Review",
+    "score": 94,
+    "findings": {
+      "critical": 0,
+      "warning": 1,
+      "suggestion": 1
+    },
+    "scope": "code: note-conflict branch vs main (commit af6ff64)"
+  },
+  {
+    "date": "2026-06-21",
+    "mode": "PR Review",
+    "score": 100,
+    "findings": {
+      "critical": 0,
+      "warning": 0,
+      "suggestion": 0
+    },
+    "scope": "tasks/17-note-conflict/review-plan.md (fix plan)"
+  },
+  {
+    "date": "2026-06-21",
+    "mode": "PR Review",
+    "score": 99,
+    "findings": {
+      "critical": 0,
+      "warning": 0,
+      "suggestion": 1
+    },
+    "scope": "code: note-conflict branch vs main (re-review after showModal-race fix)"
   }
 ]
