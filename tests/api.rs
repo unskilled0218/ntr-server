@@ -266,3 +266,22 @@ async fn note_get_and_replace() {
   let resp = app.oneshot(get("/api/note")).await.unwrap();
   assert_eq!(body_text(resp).await, "# Title\n\n- a note\n");
 }
+
+#[tokio::test]
+async fn events_stream_opens() {
+  // The body is an open SSE stream, so we only assert on the response head: a 200 with
+  // the text/event-stream content type confirms the route and SSE wiring. The stream is
+  // dropped without being consumed.
+  let app = app("events");
+  let resp = app.oneshot(get("/api/events")).await.unwrap();
+  assert_eq!(resp.status(), StatusCode::OK);
+  let content_type = resp
+    .headers()
+    .get("content-type")
+    .and_then(|v| v.to_str().ok())
+    .unwrap_or_default();
+  assert!(
+    content_type.starts_with("text/event-stream"),
+    "unexpected content-type: {content_type}"
+  );
+}

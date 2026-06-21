@@ -42,6 +42,25 @@ impl NoteStore {
     self.content = content.to_string();
     Ok(())
   }
+
+  /// Pull the file back into memory: the mirror of [`replace`](NoteStore::replace),
+  /// which pushes memory to disk. Re-reads `self.path` (a missing file is empty, as in
+  /// [`load`](NoteStore::load)) and, since the note has no structure, compares the text
+  /// directly. Returns `Ok(false)` and changes nothing when it matches — so the note's
+  /// own just-written file is seen as "no change". When it differs (an out-of-band
+  /// edit) the new text is swapped in and `Ok(true)` is returned.
+  pub fn reload_from_disk(&mut self) -> io::Result<bool> {
+    let content = match fs::read_to_string(&self.path) {
+      Ok(c) => c,
+      Err(e) if e.kind() == io::ErrorKind::NotFound => String::new(),
+      Err(e) => return Err(e),
+    };
+    if content == self.content {
+      return Ok(false);
+    }
+    self.content = content;
+    Ok(true)
+  }
 }
 
 #[cfg(test)]
@@ -81,5 +100,21 @@ mod tests {
     note.replace("second").unwrap();
     assert_eq!(note.content(), "second");
     assert_eq!(NoteStore::load(&path).unwrap().content(), "second");
+  }
+
+  #[test]
+  fn reload_from_disk_picks_up_external_edits() {
+    let path = temp_path("reload");
+    let mut note = NoteStore::load(&path).unwrap();
+    note.replace("mine\n").unwrap();
+    // The note's own write is not a change.
+    assert!(!note.reload_from_disk().unwrap());
+
+    // Another program rewrites the file out of band.
+    fs::write(&path, "# theirs\n").unwrap();
+    assert!(note.reload_from_disk().unwrap());
+    assert_eq!(note.content(), "# theirs\n");
+    // Re-reading the same content reports no change.
+    assert!(!note.reload_from_disk().unwrap());
   }
 }

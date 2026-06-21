@@ -482,5 +482,38 @@
       "suggestion": 0
     },
     "scope": "code: mobile-nav-swipe (re-review after VIEWS<->nav cross-reference comment)"
+  },
+  {
+    "date": "2026-06-21",
+    "mode": "PR Review",
+    "score": 89,
+    "findings": {
+      "critical": 0,
+      "warning": 2,
+      "suggestion": 1
+    },
+    "scope": "tasks/16-live-sync/plan.md"
+  },
+  {
+    "date": "2026-06-21",
+    "mode": "PR Review",
+    "score": 100,
+    "findings": {
+      "critical": 0,
+      "warning": 0,
+      "suggestion": 0
+    },
+    "scope": "tasks/16-live-sync/plan.md (re-review after poller-only + parse_entries + wire-contract comments)"
+  },
+  {
+    "date": "2026-06-21",
+    "mode": "PR Review",
+    "score": 99,
+    "findings": {
+      "critical": 0,
+      "warning": 0,
+      "suggestion": 1
+    },
+    "scope": "tasks/16-live-sync/plan.md (corrected to two-trigger design after E2E test exposed poller-only flaw)"
   }
 ]
