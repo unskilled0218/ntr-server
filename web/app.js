@@ -545,6 +545,49 @@ async function loadNote() {
   }
 }
 
+// --- Live updates (Server-Sent Events) ----------------------------------------------------
+// The server's watcher emits a `change` event ("tasks" or "note") whenever the underlying
+// file changes — whoever changed it — so an edit on one device shows up on the others.
+
+// The task side of a live update: re-fetch the list and the label options, the same pair the
+// add form runs after a successful POST. Named once so the event handler and the form agree.
+async function onTasksChanged() {
+  await refresh();
+  await loadLabels();
+}
+
+// The note side of a live update. Reload ONLY when it is safe to overwrite the editor: never
+// while a save is in flight, while there are unsaved edits, or while the editor is focused.
+// So an idle desktop adopts the remote note, but the device being typed on keeps its text and
+// lets its own autosave win — the one rule that stops a remote update stealing the caret or
+// clobbering a local edit, kept in one place.
+async function maybeReloadNote() {
+  if (savingNote || noteDirty() || document.activeElement === els.noteInput) return;
+  await loadNote();
+}
+
+// Open the live-update stream. The browser auto-reconnects EventSource after a drop; on a
+// *re*-connection we resync both panes because events that fired during the gap were missed.
+// The first open is skipped: the initial refresh/loadLabels/loadNote at startup already loaded
+// everything, so resyncing then would just duplicate that work.
+function connectEvents() {
+  let everConnected = false;
+  const es = new EventSource("/api/events");
+  // "tasks"/"note" are the client half of Change::as_str() in src/api.rs (which mirrors this
+  // comment); keep the two ends in sync.
+  es.addEventListener("change", (e) => {
+    if (e.data === "tasks") onTasksChanged();
+    else if (e.data === "note") maybeReloadNote();
+  });
+  es.addEventListener("open", () => {
+    if (everConnected) {
+      onTasksChanged();
+      maybeReloadNote();
+    }
+    everConnected = true;
+  });
+}
+
 // --- In-place live Markdown editor (single contenteditable surface) ---
 // The note is stored and served as raw Markdown and edited in place: the editor IS the
 // preview. highlightMarkdown wraps each character of the source in styling spans WITHOUT
@@ -908,3 +951,4 @@ setView(els.main.dataset.view || VIEWS[0]);
 refresh();
 loadLabels();
 loadNote();
+connectEvents();

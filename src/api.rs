@@ -5,16 +5,44 @@ use crate::note::NoteStore;
 use crate::store::{Entry, Filter, Store, StoreError};
 use axum::extract::{Path, Query, State};
 use axum::http::{header, StatusCode};
+use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::{Local, NaiveDate};
+use futures_util::stream::{self, Stream};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::BTreeMap;
+use std::convert::Infallible;
 use std::io;
 use std::sync::{Arc, RwLock};
+use tokio::sync::broadcast;
 use tower_http::cors::CorsLayer;
+
+/// How many live-update events the broadcast channel buffers per subscriber before a
+/// slow client starts missing them (it then re-syncs on reconnect). The signal is tiny,
+/// so a small buffer is plenty.
+const EVENT_CHANNEL_CAPACITY: usize = 16;
+
+/// Which resource changed, broadcast to live clients over the SSE stream. This is the
+/// whole wire contract for an event: [`Change::as_str`] is the payload. The JS `change`
+/// handler in web/app.js dispatches on these same two strings (search "Change::as_str"
+/// there) — keep the two ends in sync.
+#[derive(Debug, Clone, Copy)]
+pub enum Change {
+  Tasks,
+  Note,
+}
+
+impl Change {
+  fn as_str(self) -> &'static str {
+    match self {
+      Change::Tasks => "tasks",
+      Change::Note => "note",
+    }
+  }
+}
 
 /// Shared application state.
 #[derive(Clone)]
@@ -22,15 +50,33 @@ pub struct AppState {
   pub store: Arc<RwLock<Store>>,
   pub note: Arc<RwLock<NoteStore>>,
   pub config: Arc<Config>,
+  /// Sender half of the live-update channel. The watcher (the sole producer) calls
+  /// [`AppState::notify`]; each SSE client connection subscribes a fresh receiver.
+  pub tx: broadcast::Sender<Change>,
 }
 
 impl AppState {
   pub fn new(store: Store, note: NoteStore, config: Config) -> Self {
+    let (tx, _rx) = broadcast::channel(EVENT_CHANNEL_CAPACITY);
     AppState {
       store: Arc::new(RwLock::new(store)),
       note: Arc::new(RwLock::new(note)),
       config: Arc::new(config),
+      tx,
     }
+  }
+
+  /// Announce a change to every connected live client. A send with no subscribers is
+  /// fine (returns `Err`, ignored), so this is always safe to call.
+  ///
+  /// Called from two places, because a change has two origins the other cannot see:
+  /// (1) every mutation handler, after a successful write — these update memory and disk
+  /// together, so the watcher (which fires only when disk and memory *differ*) never sees
+  /// them; and (2) the file watcher, for out-of-band edits made to the file behind the
+  /// server's back. The two paths never double-fire for one change: an API write leaves
+  /// disk == memory, so the watcher stays silent for it.
+  pub fn notify(&self, change: Change) {
+    let _ = self.tx.send(change);
   }
 }
 
@@ -50,6 +96,7 @@ pub fn router(state: AppState) -> Router {
     .route("/api/tasks/{id}/uncomplete", post(uncomplete_task))
     .route("/api/raw", get(get_raw).put(put_raw))
     .route("/api/note", get(get_note).put(put_note))
+    .route("/api/events", get(events))
     // No auth by design (userless server); permissive CORS lets other
     // programs and origins call the API. Bind to loopback unless trusted.
     .layer(CorsLayer::permissive())
@@ -173,6 +220,7 @@ async fn create_task(
   let mut store = state.store.write().map_err(lock_err)?;
   let id = store.add(&req.text, state.config.add_creation_date, today())?;
   let dto = TaskDto::from_entry(store.get(id).expect("task was just added"));
+  state.notify(Change::Tasks);
   Ok((StatusCode::CREATED, Json(dto)))
 }
 
@@ -192,9 +240,9 @@ async fn update_task(
 ) -> Result<Json<TaskDto>, AppError> {
   let mut store = state.store.write().map_err(lock_err)?;
   store.update(id, &req.text)?;
-  Ok(Json(TaskDto::from_entry(
-    store.get(id).expect("task exists"),
-  )))
+  let dto = TaskDto::from_entry(store.get(id).expect("task exists"));
+  state.notify(Change::Tasks);
+  Ok(Json(dto))
 }
 
 async fn complete_task(
@@ -203,9 +251,9 @@ async fn complete_task(
 ) -> Result<Json<TaskDto>, AppError> {
   let mut store = state.store.write().map_err(lock_err)?;
   store.complete(id, today())?;
-  Ok(Json(TaskDto::from_entry(
-    store.get(id).expect("task exists"),
-  )))
+  let dto = TaskDto::from_entry(store.get(id).expect("task exists"));
+  state.notify(Change::Tasks);
+  Ok(Json(dto))
 }
 
 async fn uncomplete_task(
@@ -214,9 +262,9 @@ async fn uncomplete_task(
 ) -> Result<Json<TaskDto>, AppError> {
   let mut store = state.store.write().map_err(lock_err)?;
   store.uncomplete(id)?;
-  Ok(Json(TaskDto::from_entry(
-    store.get(id).expect("task exists"),
-  )))
+  let dto = TaskDto::from_entry(store.get(id).expect("task exists"));
+  state.notify(Change::Tasks);
+  Ok(Json(dto))
 }
 
 async fn delete_task(
@@ -225,6 +273,7 @@ async fn delete_task(
 ) -> Result<StatusCode, AppError> {
   let mut store = state.store.write().map_err(lock_err)?;
   store.delete(id)?;
+  state.notify(Change::Tasks);
   Ok(StatusCode::NO_CONTENT)
 }
 
@@ -237,6 +286,7 @@ async fn get_raw(State(state): State<AppState>) -> Result<Response, AppError> {
 async fn put_raw(State(state): State<AppState>, body: String) -> Result<StatusCode, AppError> {
   let mut store = state.store.write().map_err(lock_err)?;
   store.replace_raw(&body)?;
+  state.notify(Change::Tasks);
   Ok(StatusCode::NO_CONTENT)
 }
 
@@ -249,7 +299,33 @@ async fn get_note(State(state): State<AppState>) -> Result<Response, AppError> {
 async fn put_note(State(state): State<AppState>, body: String) -> Result<StatusCode, AppError> {
   let mut note = state.note.write().map_err(lock_err)?;
   note.replace(&body)?;
+  state.notify(Change::Note);
   Ok(StatusCode::NO_CONTENT)
+}
+
+/// Live-update stream: a Server-Sent Events connection that emits one `change` event
+/// (payload "tasks" or "note") each time that resource changes — whether from an API
+/// mutation or an out-of-band file edit (see [`AppState::notify`]). Clients re-fetch the
+/// named resource through the normal GET endpoints. A lagged subscriber (one that fell
+/// behind the buffer) skips the missed events and
+/// keeps streaming; it re-syncs on its next event or on reconnect.
+async fn events(
+  State(state): State<AppState>,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+  let rx = state.tx.subscribe();
+  let stream = stream::unfold(rx, |mut rx| async move {
+    loop {
+      match rx.recv().await {
+        Ok(change) => {
+          let event = Event::default().event("change").data(change.as_str());
+          return Some((Ok(event), rx));
+        }
+        Err(broadcast::error::RecvError::Lagged(_)) => continue,
+        Err(broadcast::error::RecvError::Closed) => return None,
+      }
+    }
+  });
+  Sse::new(stream).keep_alive(KeepAlive::default())
 }
 
 fn lock_err<E>(_: E) -> AppError {

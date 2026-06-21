@@ -60,14 +60,7 @@ impl Store {
       Err(e) => return Err(e),
     };
 
-    let mut entries = Vec::new();
-    let mut next_id = 1;
-    for line in content.lines() {
-      if let Some(task) = Task::parse(line) {
-        entries.push(Entry { id: next_id, task });
-        next_id += 1;
-      }
-    }
+    let (entries, next_id) = parse_entries(&content, 1);
     Ok(Store {
       path,
       entries,
@@ -187,15 +180,31 @@ impl Store {
   /// from the running counter (old ids become invalid); this is the one bulk
   /// operation that rotates ids.
   pub fn replace_raw(&mut self, text: &str) -> Result<(), StoreError> {
-    let mut entries = Vec::new();
-    let mut next_id = self.next_id;
-    for line in text.lines() {
-      if let Some(task) = Task::parse(line) {
-        entries.push(Entry { id: next_id, task });
-        next_id += 1;
-      }
-    }
+    let (entries, next_id) = parse_entries(text, self.next_id);
     self.save(entries, next_id)
+  }
+
+  /// Pull the file back into memory: the mirror of [`save`](Store::save), which
+  /// pushes memory to disk. Re-reads `self.path` (a missing file is empty, as in
+  /// [`load`](Store::load)) and compares the canonical render of what is on disk
+  /// against the current render. Returns `Ok(false)` and changes nothing when they
+  /// match — so the store's own just-written file (and any whitespace-only edit the
+  /// parser discards) is correctly seen as "no change". When they differ this is an
+  /// out-of-band edit: the new entries are swapped in (ids rotate, as in
+  /// [`replace_raw`](Store::replace_raw)) and `Ok(true)` is returned.
+  pub fn reload_from_disk(&mut self) -> io::Result<bool> {
+    let content = match fs::read_to_string(&self.path) {
+      Ok(c) => c,
+      Err(e) if e.kind() == io::ErrorKind::NotFound => String::new(),
+      Err(e) => return Err(e),
+    };
+    let (entries, next_id) = parse_entries(&content, self.next_id);
+    if render(&entries) == render(&self.entries) {
+      return Ok(false);
+    }
+    self.entries = entries;
+    self.next_id = next_id;
+    Ok(true)
   }
 
   /// Persist `entries` to disk, then swap them into memory on success.
@@ -205,6 +214,23 @@ impl Store {
     self.next_id = next_id;
     Ok(())
   }
+}
+
+/// Parse todo.txt text into entries, assigning ids from `start_id` upward (blank
+/// and unparseable lines are skipped). Returns the entries and the next free id.
+/// The single home for "how a todo.txt becomes ids+entries", shared by
+/// [`load`](Store::load), [`replace_raw`](Store::replace_raw), and
+/// [`reload_from_disk`](Store::reload_from_disk).
+fn parse_entries(content: &str, start_id: u64) -> (Vec<Entry>, u64) {
+  let mut entries = Vec::new();
+  let mut next_id = start_id;
+  for line in content.lines() {
+    if let Some(task) = Task::parse(line) {
+      entries.push(Entry { id: next_id, task });
+      next_id += 1;
+    }
+  }
+  (entries, next_id)
 }
 
 /// Render entries as todo.txt text (one task per line, trailing newline each).
@@ -319,5 +345,41 @@ mod tests {
       s.add("   ", true, today()),
       Err(StoreError::Invalid(_))
     ));
+  }
+
+  #[test]
+  fn reload_from_disk_picks_up_external_edits() {
+    let mut path = std::env::temp_dir();
+    path.push(format!("ntr-store-reload-{}.txt", std::process::id()));
+    let _ = fs::remove_file(&path);
+
+    let mut s = Store::load(&path).unwrap();
+    s.add("a", true, today()).unwrap();
+    // The store's own write is not a change.
+    assert!(!s.reload_from_disk().unwrap());
+
+    // Another program rewrites the file out of band.
+    fs::write(&path, "(A) one\ntwo +proj\n").unwrap();
+    assert!(s.reload_from_disk().unwrap());
+    let all = s.list(&Filter::default());
+    assert_eq!(all.len(), 2);
+    assert_eq!(all[0].task.priority, Some('A'));
+    // Re-reading the same content reports no change.
+    assert!(!s.reload_from_disk().unwrap());
+  }
+
+  #[test]
+  fn reload_ignores_whitespace_only_difference() {
+    let mut path = std::env::temp_dir();
+    path.push(format!("ntr-store-reload-ws-{}.txt", std::process::id()));
+    let _ = fs::remove_file(&path);
+
+    let mut s = Store::load(&path).unwrap();
+    s.add("only task", true, today()).unwrap();
+    // A blank line the parser discards renders identically, so it is not a change.
+    let mut text = s.raw();
+    text.push('\n');
+    fs::write(&path, text).unwrap();
+    assert!(!s.reload_from_disk().unwrap());
   }
 }
