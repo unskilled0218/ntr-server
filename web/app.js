@@ -573,47 +573,61 @@ async function onTasksChanged() {
   await loadLabels();
 }
 
-// What a note `change` event means, given the last-saved base, the editor's current text, and
-// the incoming remote text. Pure (three strings in, one verdict out) so the meaning of an event
-// has a single, testable home and the DOM code below stays a thin shell:
-//   "in-sync"  — the editor already holds the remote text; just move the saved base.
-//   "adopt"    — no unsaved local edits, so take the remote version.
-//   "conflict" — unsaved local edits AND the remote differs from them; the user must choose.
+// What reconciling the editor with the server means, given the last-saved base, the editor's
+// current text, and the freshly-fetched remote text. The first question is whether the SERVER
+// diverged from our base; only then does the local text decide the rest. Pure (three strings
+// in, one verdict out) so the meaning has a single, testable home and the DOM code below stays
+// a thin shell. Used by both the live-update handler and the focus re-check, so it must hold
+// for an arbitrary fetch, not just an SSE "something changed" event:
+//   "noop"     — the server has not changed from our base; nothing to do (keep editing).
+//   "adopt"    — the server changed and there are no unsaved local edits; take the remote.
+//   "in-sync"  — the server changed but the editor already holds that text; just rebase the base.
+//   "conflict" — the server changed AND unsaved local edits differ from it; the user must choose.
 function classifyNoteEvent(saved, local, remote) {
-  if (local === remote) return "in-sync";
+  if (remote === saved) return "noop";
   if (local === saved) return "adopt";
+  if (local === remote) return "in-sync";
   return "conflict";
 }
 
-// The note side of a live update. A save in flight or a pending conflict already owns the
-// editor, so defer. A focused editor with no unsaved edits is left alone (no data to lose, and
-// reloading would steal the caret). Otherwise fetch the remote text and act on the verdict:
-// silently for in-sync/adopt, or by asking the user when local edits would be lost.
-async function maybeReloadNote() {
+// Fetch the server's note and bring the editor in line with it: silently when nothing would be
+// lost (noop / in-sync / adopt) or by prompting when unsaved local edits differ (conflict). The
+// shared core of "reconcile with the server", used by the live-update handler and the focus
+// re-check. A save in flight or a pending conflict already owns the editor, so defer.
+async function reconcileNote() {
   if (savingNote || noteConflict) return;
-  if (!noteDirty() && document.activeElement === els.noteInput) return;
   let remote;
   try {
     remote = await fetchNote();
   } catch (_) {
-    return; // transient; a later event or the reconnect resync retries
+    return; // transient; a later event, the reconnect resync, or the next focus retries
   }
-  // The fetch awaited, so two overlapping events (e.g. a change event + the reconnect
-  // resync) can both reach here; re-check now that a save or conflict may have started.
-  // JS runs each continuation to completion, so the first owner wins and the rest back off.
+  // The fetch awaited, so two overlapping triggers (e.g. a change event + the focus re-check)
+  // can both reach here; re-check now that a save or conflict may have started. JS runs each
+  // continuation to completion, so the first owner wins and the rest back off.
   if (savingNote || noteConflict) return;
   const local = readNoteText(els.noteInput);
   switch (classifyNoteEvent(savedNote, local, remote)) {
-    case "in-sync":
-      savedNote = remote;
+    case "noop":
       break;
     case "adopt":
       adoptNote(remote);
+      break;
+    case "in-sync":
+      savedNote = remote;
       break;
     case "conflict":
       openNoteConflict(remote);
       break;
   }
+}
+
+// The note side of a live update (an SSE `note` event). A focused editor with no unsaved edits
+// is left alone here so a mid-session event does not yank the caret — the focus re-check (and
+// blur flush) reconcile that case instead. Otherwise reconcile with the server.
+async function maybeReloadNote() {
+  if (!noteDirty() && document.activeElement === els.noteInput) return;
+  await reconcileNote();
 }
 
 // A remote change collided with unsaved local edits: show both versions and let the user pick.
@@ -960,6 +974,10 @@ els.noteInput.addEventListener("paste", (e) => {
   spliceNote(e.clipboardData.getData("text/plain"));
 });
 els.noteInput.addEventListener("blur", flushNote);
+// Returning to the editor is the moment to reconcile with the server: the live stream may have
+// missed an event (a dropped SSE connection) or skipped a focused-but-clean update, and the
+// user has not started typing yet, so a refresh is expected rather than disruptive.
+els.noteInput.addEventListener("focus", reconcileNote);
 window.addEventListener("pagehide", flushNoteBeacon);
 
 // Conflict dialog: the buttons pick a side; the `close` event (Escape / dismiss) defaults to
