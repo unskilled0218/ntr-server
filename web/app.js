@@ -598,6 +598,10 @@ async function maybeReloadNote() {
   } catch (_) {
     return; // transient; a later event or the reconnect resync retries
   }
+  // The fetch awaited, so two overlapping events (e.g. a change event + the reconnect
+  // resync) can both reach here; re-check now that a save or conflict may have started.
+  // JS runs each continuation to completion, so the first owner wins and the rest back off.
+  if (savingNote || noteConflict) return;
   const local = readNoteText(els.noteInput);
   switch (classifyNoteEvent(savedNote, local, remote)) {
     case "in-sync":
@@ -614,11 +618,14 @@ async function maybeReloadNote() {
 
 // A remote change collided with unsaved local edits: show both versions and let the user pick.
 // Set noteConflict BEFORE showModal so the blur it triggers on the editor hits flushNote's
-// conflict guard and cannot sneak a save in ahead of the choice.
+// conflict guard and cannot sneak a save in ahead of the choice. If the dialog is already
+// open (a later event arrived mid-conflict), just refresh the incoming version rather than
+// calling showModal twice — the one home for "never show the dialog twice".
 function openNoteConflict(remote) {
   noteConflict = remote;
-  els.conflictMine.textContent = readNoteText(els.noteInput);
   els.conflictTheirs.textContent = remote;
+  if (els.conflictDialog.open) return;
+  els.conflictMine.textContent = readNoteText(els.noteInput);
   els.conflictDialog.showModal();
 }
 
