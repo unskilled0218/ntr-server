@@ -25,6 +25,21 @@ Configuration (environment variables):
 > Security: there is no authentication by design. Keep the default loopback
 > bind, or put it behind an authenticating reverse proxy before exposing it.
 
+### With Docker Compose
+
+`docker-compose.yml` runs the server straight from source using the official Rust
+image — no Dockerfile to build:
+
+```sh
+docker compose up          # then open http://localhost:8080
+NTR_PORT=9000 docker compose up   # use a different port
+```
+
+`todo.txt` and `Note.md` live in `./data` on the host, so they persist across
+restarts and can be edited out of band (the server watches them and pushes the
+changes to open clients). The first `up` compiles the dependencies (a few minutes);
+the cargo build/registry caches are kept in named volumes, so later starts are fast.
+
 ## API
 
 All task responses use this JSON shape:
