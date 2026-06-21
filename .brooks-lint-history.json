@@ -515,5 +515,38 @@
       "suggestion": 1
     },
     "scope": "tasks/16-live-sync/plan.md (corrected to two-trigger design after E2E test exposed poller-only flaw)"
+  },
+  {
+    "date": "2026-06-21",
+    "mode": "PR Review",
+    "score": 94,
+    "findings": {
+      "critical": 0,
+      "warning": 1,
+      "suggestion": 1
+    },
+    "scope": "code: live-sync branch vs main (commit a04db15)"
+  },
+  {
+    "date": "2026-06-21",
+    "mode": "PR Review",
+    "score": 100,
+    "findings": {
+      "critical": 0,
+      "warning": 0,
+      "suggestion": 0
+    },
+    "scope": "tasks/16-live-sync/review-plan.md (fix plan)"
+  },
+  {
+    "date": "2026-06-21",
+    "mode": "PR Review",
+    "score": 100,
+    "findings": {
+      "critical": 0,
+      "warning": 0,
+      "suggestion": 0
+    },
+    "scope": "code: live-sync branch vs main (re-review after coverage test + watch.rs dedup)"
   }
 ]

@@ -2,7 +2,7 @@
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use my_ntr_server::api::{router, AppState};
+use my_ntr_server::api::{router, AppState, Change};
 use my_ntr_server::config::Config;
 use my_ntr_server::note::NoteStore;
 use my_ntr_server::store::Store;
@@ -18,6 +18,13 @@ fn temp_path(tag: &str) -> PathBuf {
 }
 
 fn app(tag: &str) -> axum::Router {
+  app_with_state(tag).0
+}
+
+// Build the router together with its AppState, so a test can both drive HTTP requests and
+// observe the live-update channel. `app` delegates here, keeping the construction rule in
+// one place.
+fn app_with_state(tag: &str) -> (axum::Router, AppState) {
   let path = temp_path(tag);
   let note_path = temp_path(&format!("{tag}-note"));
   let store = Store::load(&path).unwrap();
@@ -27,7 +34,8 @@ fn app(tag: &str) -> axum::Router {
     note_file: note_path,
     ..Config::default()
   };
-  router(AppState::new(store, note, config))
+  let state = AppState::new(store, note, config);
+  (router(state.clone()), state)
 }
 
 async fn body_bytes(resp: axum::response::Response) -> Vec<u8> {
@@ -283,5 +291,35 @@ async fn events_stream_opens() {
   assert!(
     content_type.starts_with("text/event-stream"),
     "unexpected content-type: {content_type}"
+  );
+}
+
+#[tokio::test]
+async fn mutation_broadcasts_event() {
+  // The behavior live sync depends on: a successful mutation announces the matching
+  // Change on the broadcast channel. Subscribe before mutating so nothing is missed.
+  let (app, state) = app_with_state("events-broadcast");
+  let mut rx = state.tx.subscribe();
+
+  app
+    .clone()
+    .oneshot(json_post(
+      "/api/tasks",
+      serde_json::json!({ "text": "live task" }),
+    ))
+    .await
+    .unwrap();
+  assert!(
+    matches!(rx.try_recv(), Ok(Change::Tasks)),
+    "creating a task should broadcast Change::Tasks"
+  );
+
+  app
+    .oneshot(put_text("/api/note", "live note"))
+    .await
+    .unwrap();
+  assert!(
+    matches!(rx.try_recv(), Ok(Change::Note)),
+    "writing the note should broadcast Change::Note"
   );
 }

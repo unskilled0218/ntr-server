@@ -11,7 +11,30 @@
 //! for such an out-of-band edit to propagate.
 
 use crate::api::{AppState, Change};
+use crate::note::NoteStore;
+use crate::store::Store;
+use std::io;
+use std::sync::RwLock;
 use std::time::Duration;
+
+/// Lets [`poll`] reload either store through one code path. Both stores already have an
+/// inherent `reload_from_disk`; this trait only exposes it generically so the
+/// poll-one-resource policy lives in a single place.
+trait ReloadFromDisk {
+  fn reload_from_disk(&mut self) -> io::Result<bool>;
+}
+
+impl ReloadFromDisk for Store {
+  fn reload_from_disk(&mut self) -> io::Result<bool> {
+    Store::reload_from_disk(self)
+  }
+}
+
+impl ReloadFromDisk for NoteStore {
+  fn reload_from_disk(&mut self) -> io::Result<bool> {
+    NoteStore::reload_from_disk(self)
+  }
+}
 
 /// Spawn the watcher loop on the tokio runtime. Every `interval` it pulls each file back
 /// into memory via the store's own `reload_from_disk` (which decides whether anything
@@ -27,23 +50,23 @@ pub fn spawn(state: AppState, interval: Duration) {
   });
 }
 
-/// One poll pass: reload the store and the note, announcing each that changed. Split out
-/// so the loop stays trivial; `reload_from_disk` is the one place that judges "changed".
+/// One poll pass: reload the store and the note, announcing each that changed.
 fn reload_and_notify(state: &AppState) {
-  match state.store.write() {
-    Ok(mut store) => match store.reload_from_disk() {
-      Ok(true) => state.notify(Change::Tasks),
+  poll(&state.store, state, Change::Tasks, "tasks");
+  poll(&state.note, state, Change::Note, "note");
+}
+
+/// Reload one resource from disk and announce `change` if it actually changed. The single
+/// home for the "reload, notify on change, log on error" policy; `label` names the
+/// resource in log messages. A poisoned lock or an I/O error is logged and skipped so the
+/// next tick can retry.
+fn poll<T: ReloadFromDisk>(lock: &RwLock<T>, state: &AppState, change: Change, label: &str) {
+  match lock.write() {
+    Ok(mut resource) => match resource.reload_from_disk() {
+      Ok(true) => state.notify(change),
       Ok(false) => {}
-      Err(e) => eprintln!("watch: reloading tasks failed: {e}"),
+      Err(e) => eprintln!("watch: reloading {label} failed: {e}"),
     },
-    Err(_) => eprintln!("watch: task store lock poisoned"),
-  }
-  match state.note.write() {
-    Ok(mut note) => match note.reload_from_disk() {
-      Ok(true) => state.notify(Change::Note),
-      Ok(false) => {}
-      Err(e) => eprintln!("watch: reloading note failed: {e}"),
-    },
-    Err(_) => eprintln!("watch: note store lock poisoned"),
+    Err(_) => eprintln!("watch: {label} store lock poisoned"),
   }
 }
