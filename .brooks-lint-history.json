@@ -603,5 +603,16 @@
       "suggestion": 1
     },
     "scope": "code: note-conflict branch vs main (re-review after showModal-race fix)"
+  },
+  {
+    "date": "2026-06-21",
+    "mode": "PR Review",
+    "score": 99,
+    "findings": {
+      "critical": 0,
+      "warning": 0,
+      "suggestion": 1
+    },
+    "scope": "tasks/18-note-focus-conflict/plan.md"
   }
 ]
