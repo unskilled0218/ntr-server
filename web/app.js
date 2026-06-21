@@ -95,6 +95,11 @@ const els = {
   panes: document.querySelector(".panes"),
   nav: document.querySelector(".bottom-nav"),
   navButtons: Array.from(document.querySelectorAll(".bottom-nav button")),
+  conflictDialog: document.getElementById("note-conflict"),
+  conflictMine: document.getElementById("conflict-mine"),
+  conflictTheirs: document.getElementById("conflict-theirs"),
+  conflictMineBtn: document.getElementById("conflict-mine-btn"),
+  conflictTheirsBtn: document.getElementById("conflict-theirs-btn"),
 };
 
 // Filter label selects keyed by kind name, parallel to how els[kind] keys the
@@ -476,6 +481,11 @@ let noteSaveTimer = null;
 // True while a PUT is in flight, so a second flush never starts an overlapping,
 // possibly out-of-order, write (single-flight).
 let savingNote = false;
+// While a live update conflicts with unsaved local edits, this holds the incoming remote
+// text awaiting the user's choice (null = no conflict pending). Truthy means the conflict
+// dialog owns the note: it blocks reloads (maybeReloadNote) and saves (flushNote) so an
+// armed autosave can't silently resolve the conflict before the user picks a side.
+let noteConflict = null;
 
 // The one definition of "the note has unsaved edits": the editor's text differs from the
 // last persisted text. Every save path (the flush guard, the post-save re-check, the
@@ -504,6 +514,7 @@ function scheduleNoteSave() {
 async function flushNote() {
   clearTimeout(noteSaveTimer);
   noteSaveTimer = null;
+  if (noteConflict) return; // a conflict is pending; don't push local text up until it's resolved
   if (savingNote) return; // single-flight; the in-flight save's re-check will catch up
   if (!noteDirty()) return; // nothing changed
   const text = readNoteText(els.noteInput);
@@ -534,12 +545,18 @@ function flushNoteBeacon() {
   putNote(readNoteText(els.noteInput), { keepalive: true }).catch(() => {});
 }
 
+// Make the editor show `text` as the saved, clean note: it becomes the new base, renders in
+// place (no caret to restore), and clears the status. The one home for "this note is now what
+// we have"; used by the initial load and by every live-update path that takes a remote version.
+function adoptNote(text) {
+  savedNote = text;
+  setEditorText(text, null);
+  setNoteStatus("", false);
+}
+
 async function loadNote() {
   try {
-    const text = await fetchNote();
-    savedNote = text;
-    setEditorText(text, null); // render the loaded note in place; no caret to restore yet
-    setNoteStatus("", false); // freshly loaded: clean, no message
+    adoptNote(await fetchNote());
   } catch (err) {
     setNoteStatus(`Could not load note: ${err.message}`, true);
   }
@@ -556,14 +573,71 @@ async function onTasksChanged() {
   await loadLabels();
 }
 
-// The note side of a live update. Reload ONLY when it is safe to overwrite the editor: never
-// while a save is in flight, while there are unsaved edits, or while the editor is focused.
-// So an idle desktop adopts the remote note, but the device being typed on keeps its text and
-// lets its own autosave win — the one rule that stops a remote update stealing the caret or
-// clobbering a local edit, kept in one place.
+// What a note `change` event means, given the last-saved base, the editor's current text, and
+// the incoming remote text. Pure (three strings in, one verdict out) so the meaning of an event
+// has a single, testable home and the DOM code below stays a thin shell:
+//   "in-sync"  — the editor already holds the remote text; just move the saved base.
+//   "adopt"    — no unsaved local edits, so take the remote version.
+//   "conflict" — unsaved local edits AND the remote differs from them; the user must choose.
+function classifyNoteEvent(saved, local, remote) {
+  if (local === remote) return "in-sync";
+  if (local === saved) return "adopt";
+  return "conflict";
+}
+
+// The note side of a live update. A save in flight or a pending conflict already owns the
+// editor, so defer. A focused editor with no unsaved edits is left alone (no data to lose, and
+// reloading would steal the caret). Otherwise fetch the remote text and act on the verdict:
+// silently for in-sync/adopt, or by asking the user when local edits would be lost.
 async function maybeReloadNote() {
-  if (savingNote || noteDirty() || document.activeElement === els.noteInput) return;
-  await loadNote();
+  if (savingNote || noteConflict) return;
+  if (!noteDirty() && document.activeElement === els.noteInput) return;
+  let remote;
+  try {
+    remote = await fetchNote();
+  } catch (_) {
+    return; // transient; a later event or the reconnect resync retries
+  }
+  const local = readNoteText(els.noteInput);
+  switch (classifyNoteEvent(savedNote, local, remote)) {
+    case "in-sync":
+      savedNote = remote;
+      break;
+    case "adopt":
+      adoptNote(remote);
+      break;
+    case "conflict":
+      openNoteConflict(remote);
+      break;
+  }
+}
+
+// A remote change collided with unsaved local edits: show both versions and let the user pick.
+// Set noteConflict BEFORE showModal so the blur it triggers on the editor hits flushNote's
+// conflict guard and cannot sneak a save in ahead of the choice.
+function openNoteConflict(remote) {
+  noteConflict = remote;
+  els.conflictMine.textContent = readNoteText(els.noteInput);
+  els.conflictTheirs.textContent = remote;
+  els.conflictDialog.showModal();
+}
+
+// Resolve the pending note conflict. Idempotent (the button click closes the dialog, whose
+// `close` event calls this again — the second call no-ops). "Use theirs" discards the local
+// edits for the remote version; "keep mine" treats the remote as the new base and saves the
+// local text over it, so the user's version wins on the server. Closing without a choice
+// (Escape) routes here as keep-mine, because losing the active user's unsaved work is worse.
+function resolveNoteConflict(useTheirs) {
+  if (!noteConflict) return;
+  const remote = noteConflict;
+  noteConflict = null;
+  if (els.conflictDialog.open) els.conflictDialog.close();
+  if (useTheirs) {
+    adoptNote(remote);
+  } else {
+    savedNote = remote; // their version is now the base; the editor is dirty against it...
+    flushNote(); // ...so this PUTs the local text and it wins
+  }
 }
 
 // Open the live-update stream. The browser auto-reconnects EventSource after a drop; on a
@@ -880,6 +954,12 @@ els.noteInput.addEventListener("paste", (e) => {
 });
 els.noteInput.addEventListener("blur", flushNote);
 window.addEventListener("pagehide", flushNoteBeacon);
+
+// Conflict dialog: the buttons pick a side; the `close` event (Escape / dismiss) defaults to
+// keep-mine so an unanswered prompt never throws away the user's unsaved work.
+els.conflictMineBtn.addEventListener("click", () => resolveNoteConflict(false));
+els.conflictTheirsBtn.addEventListener("click", () => resolveNoteConflict(true));
+els.conflictDialog.addEventListener("close", () => resolveNoteConflict(false));
 
 // --- Mobile view switching (bottom nav + swipe) -------------------------------------------
 // The two panes are an ordered list of views: the nav-button order, the swipe direction, and

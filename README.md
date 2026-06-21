@@ -58,6 +58,7 @@ All task responses use this JSON shape:
 | `PUT /api/raw`                   | Replace the whole file from a `text/plain` body.  |
 | `GET /api/note`                  | The Markdown note as `text/markdown`.             |
 | `PUT /api/note`                  | Replace the note from a text body (`204`).        |
+| `GET /api/events`                | Server-Sent Events stream of `change` events (`tasks` / `note`) for live updates. |
 
 ### Task ids
 
@@ -81,7 +82,9 @@ text, the scratchpad counterpart to the structured todo.txt — stored in its ow
 file, cached in memory, and written atomically (temp file + rename) just like the
 task store, so the file and memory never diverge. A missing file is treated as an
 empty note. There is no per-task note and no versioning; `PUT /api/note` is
-last-write-wins, the same as `PUT /api/raw` for the task file.
+last-write-wins, the same as `PUT /api/raw` for the task file. The WebUI softens this for
+its own editor with a conflict prompt (see below), but the HTTP endpoint itself stays a
+plain overwrite.
 
 ## WebUI
 
@@ -104,7 +107,16 @@ The editor **auto-saves**: there is no Save button. Edits are written shortly af
 stop typing (a short debounce), immediately when you leave the field, and best-effort
 when the page closes, so the note keeps itself saved. A status line tracks state —
 `Editing…`, `Saving…`, `Saved`, or a red load/save error (a failed save is retried on the
-next edit). Saving is still last-write-wins, the same as `PUT /api/note`.
+next edit).
+
+**Live updates.** Every open page subscribes to `GET /api/events`, so a change made on one
+device (or to `todo.txt` / `Note.md` directly by another program) shows up on the others
+without a reload — the task list re-fetches, and an idle note editor adopts the new text.
+If the note changed elsewhere **while you have unsaved edits**, the editor cannot silently
+pick a winner, so it asks: a dialog shows your unsaved version next to the incoming one and
+you choose **Keep mine** (save your text over theirs) or **Use theirs** (discard your edits).
+Dismissing the dialog keeps your unsaved work. When there are no unsaved edits, saving is
+still last-write-wins, the same as `PUT /api/note`.
 
 The todo pane lists, filters, and edits tasks. The add form has a free-text
 description plus four native dropdown/picker controls beneath it, all styled
