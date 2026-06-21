@@ -548,5 +548,27 @@
       "suggestion": 0
     },
     "scope": "code: live-sync branch vs main (re-review after coverage test + watch.rs dedup)"
+  },
+  {
+    "date": "2026-06-21",
+    "mode": "PR Review",
+    "score": 95,
+    "findings": {
+      "critical": 0,
+      "warning": 1,
+      "suggestion": 1
+    },
+    "scope": "tasks/17-note-conflict/plan.md"
+  },
+  {
+    "date": "2026-06-21",
+    "mode": "PR Review",
+    "score": 99,
+    "findings": {
+      "critical": 0,
+      "warning": 1,
+      "suggestion": 0
+    },
+    "scope": "tasks/17-note-conflict/plan.md (re-review after rebase->in-sync rename)"
   }
 ]

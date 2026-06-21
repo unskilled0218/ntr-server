@@ -106,6 +106,27 @@
           </div>
         </form>
       </dialog>
+
+      <dialog id="note-conflict" aria-labelledby="note-conflict-title">
+        <h2 id="note-conflict-title">Note changed on another device</h2>
+        <p class="note-conflict-msg">
+          You have unsaved edits and the note was changed elsewhere. Choose which version to keep.
+        </p>
+        <div class="note-conflict-versions">
+          <section>
+            <h3>Your unsaved version</h3>
+            <pre id="conflict-mine" class="note-conflict-text"></pre>
+          </section>
+          <section>
+            <h3>Incoming version</h3>
+            <pre id="conflict-theirs" class="note-conflict-text"></pre>
+          </section>
+        </div>
+        <div class="modal-actions">
+          <button type="button" id="conflict-theirs-btn">Use theirs</button>
+          <button type="button" id="conflict-mine-btn" class="primary">Keep mine</button>
+        </div>
+      </dialog>
     </main>
 
     <script src="/static/app.js"></script>
