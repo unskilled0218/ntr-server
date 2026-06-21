@@ -1,0 +1,37 @@
+# Run my-ntr-server with no Dockerfile: the official Rust image builds and runs the crate
+# from the mounted source. todo.txt and Note.md live in ./data on the host so they persist
+# and can be edited outside the container (the server watches them and updates clients live).
+# First `up` compiles the dependency tree (a few minutes); the cargo caches below make every
+# later start fast. Override the port with NTR_PORT, e.g. `NTR_PORT=9000 docker compose up`.
+services:
+  my-ntr-server:
+    image: rust:1-bookworm
+    working_dir: /usr/src/app
+    command: cargo run --release
+    environment:
+      # The app defaults to 127.0.0.1, which a published port cannot reach; bind all
+      # interfaces inside the container instead.
+      HOST: 0.0.0.0
+      PORT: ${NTR_PORT:-8080}
+      TODO_FILE: /data/todo.txt
+      NOTE_FILE: /data/Note.md
+      TODO_ADD_CREATION_DATE: "true"
+    ports:
+      - "${NTR_PORT:-8080}:${NTR_PORT:-8080}"
+    volumes:
+      - ./:/usr/src/app                                # source, so cargo can build (no Dockerfile)
+      - ./data:/data                                   # todo.txt + Note.md, editable from the host
+      - ntr-cargo-target:/usr/src/app/target          # build cache, isolated from the host target/
+      - ntr-cargo-registry:/usr/local/cargo/registry  # crate download cache
+    healthcheck:
+      # /api/health is the app's liveness endpoint; the rust image (buildpack-deps base) ships curl.
+      test: ["CMD", "curl", "-fsS", "http://localhost:${NTR_PORT:-8080}/api/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 300s # generous: covers the first from-source compile
+    restart: unless-stopped
+
+volumes:
+  ntr-cargo-target:
+  ntr-cargo-registry:
