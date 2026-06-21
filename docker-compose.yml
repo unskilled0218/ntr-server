@@ -3,6 +3,8 @@
 # and can be edited outside the container (the server watches them and updates clients live).
 # First `up` compiles the dependency tree (a few minutes); the cargo caches below make every
 # later start fast. Override the port with NTR_PORT, e.g. `NTR_PORT=9000 docker compose up`.
+# The server is published on 127.0.0.1 only by default (it is unauthenticated, like the app's
+# own loopback default); set NTR_BIND=0.0.0.0 to reach it from other devices on your network.
 services:
   my-ntr-server:
     image: rust:1-bookworm
@@ -17,7 +19,8 @@ services:
       NOTE_FILE: /data/Note.md
       TODO_ADD_CREATION_DATE: "true"
     ports:
-      - "${NTR_PORT:-8080}:${NTR_PORT:-8080}"
+      # Host bind defaults to loopback; set NTR_BIND=0.0.0.0 to expose on the network.
+      - "${NTR_BIND:-127.0.0.1}:${NTR_PORT:-8080}:${NTR_PORT:-8080}"
     volumes:
       - ./:/usr/src/app                                # source, so cargo can build (no Dockerfile)
       - ./data:/data                                   # todo.txt + Note.md, editable from the host

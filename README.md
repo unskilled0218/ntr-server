@@ -31,9 +31,15 @@ Configuration (environment variables):
 image — no Dockerfile to build:
 
 ```sh
-docker compose up          # then open http://localhost:8080
-NTR_PORT=9000 docker compose up   # use a different port
+docker compose up                  # then open http://localhost:8080
+NTR_PORT=9000 docker compose up     # use a different port
+NTR_BIND=0.0.0.0 docker compose up  # reach it from other devices on your network
 ```
+
+The server is published on `127.0.0.1` only by default, matching the app's loopback
+default — it is unauthenticated, so exposing it to the network (`NTR_BIND=0.0.0.0`)
+is a deliberate choice; do it only on a trusted network or behind an authenticating
+proxy.
 
 `todo.txt` and `Note.md` live in `./data` on the host, so they persist across
 restarts and can be edited out of band (the server watches them and pushes the
