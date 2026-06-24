@@ -14,13 +14,12 @@ services:
       # The app defaults to 127.0.0.1, which a published port cannot reach; bind all
       # interfaces inside the container instead.
       HOST: 0.0.0.0
-      PORT: ${NTR_PORT:-8080}
+      PORT: 8080
       TODO_FILE: /data/todo.txt
       NOTE_FILE: /data/Note.md
       TODO_ADD_CREATION_DATE: "true"
     ports:
-      # Host bind defaults to loopback; set NTR_BIND=0.0.0.0 to expose on the network.
-      - "${NTR_BIND:-127.0.0.1}:${NTR_PORT:-8080}:${NTR_PORT:-8080}"
+      - "0.0.0.0:8080:8080"
     volumes:
       - ./:/usr/src/app                                # source, so cargo can build (no Dockerfile)
       - ./data:/data                                   # todo.txt + Note.md, editable from the host
@@ -28,7 +27,7 @@ services:
       - ntr-cargo-registry:/usr/local/cargo/registry  # crate download cache
     healthcheck:
       # /api/health is the app's liveness endpoint; the rust image (buildpack-deps base) ships curl.
-      test: ["CMD", "curl", "-fsS", "http://localhost:${NTR_PORT:-8080}/api/health"]
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080}/api/health"]
       interval: 30s
       timeout: 3s
       retries: 3
