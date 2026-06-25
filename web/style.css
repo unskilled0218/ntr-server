@@ -12,6 +12,18 @@
   box-sizing: border-box;
 }
 
+/* Focus is shown only for keyboard users, and in neutral grey — never the blue
+   --accent / user-agent ring. Mouse and touch focus (e.g. after clicking a
+   button or opening a picker) shows no outline. A single root rule covers every
+   current and future focusable control. */
+:focus {
+  outline: none;
+}
+:focus-visible {
+  outline: 2px solid var(--muted);
+  outline-offset: 1px;
+}
+
 /* FIXED-HEIGHT LAYOUT (no page scroll), at every width: the page is one viewport tall and
    panes scroll internally. On mobile the @media block below shows one pane at a time + a
    bottom bar; on desktop both panes show side by side. */
@@ -118,8 +130,10 @@ h1 {
   overflow: auto; /* the editor surface is what scrolls */
 }
 
-.note-input:focus {
-  outline: 2px solid var(--accent);
+/* Inherits `outline: 2px solid var(--muted)` from the global :focus-visible
+   rule; only the inset offset is special here, so the ring stays inside the
+   editor's own border (the editor fills its pane; an outset ring would clip). */
+.note-input:focus-visible {
   outline-offset: -1px;
 }
 
