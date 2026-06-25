@@ -1,4 +1,4 @@
-//! Binary entry point: load config, open the store, serve the API and WebUI.
+//! Binary entry point: load config, open the store, serve the API.
 
 use my_ntr_server::api;
 use my_ntr_server::config::Config;

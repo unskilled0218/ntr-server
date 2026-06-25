@@ -1,4 +1,4 @@
-//! HTTP API and WebUI routes.
+//! HTTP API routes.
 
 use crate::config::Config;
 use crate::note::NoteStore;
@@ -6,7 +6,7 @@ use crate::store::{Entry, Filter, Store, StoreError};
 use axum::extract::{Path, Query, State};
 use axum::http::{header, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
-use axum::response::{Html, IntoResponse, Response};
+use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::{Local, NaiveDate};
@@ -26,9 +26,9 @@ use tower_http::cors::CorsLayer;
 const EVENT_CHANNEL_CAPACITY: usize = 16;
 
 /// Which resource changed, broadcast to live clients over the SSE stream. This is the
-/// whole wire contract for an event: [`Change::as_str`] is the payload. The JS `change`
-/// handler in web/app.js dispatches on these same two strings (search "Change::as_str"
-/// there) — keep the two ends in sync.
+/// whole wire contract for an event: [`Change::as_str`] is the payload. SSE clients dispatch
+/// on these same two strings to decide which resource to re-fetch — keep the wire payloads and
+/// any consumer in sync.
 #[derive(Debug, Clone, Copy)]
 pub enum Change {
   Tasks,
@@ -80,12 +80,9 @@ impl AppState {
   }
 }
 
-/// Build the router with all API and WebUI routes wired up.
+/// Build the router with all API routes wired up.
 pub fn router(state: AppState) -> Router {
   Router::new()
-    .route("/", get(index))
-    .route("/static/app.js", get(app_js))
-    .route("/static/style.css", get(style_css))
     .route("/api/health", get(health))
     .route("/api/tasks", get(list_tasks).post(create_task))
     .route(
@@ -330,25 +327,4 @@ async fn events(
 
 fn lock_err<E>(_: E) -> AppError {
   AppError::Internal("store lock poisoned".to_string())
-}
-
-async fn index() -> Html<&'static str> {
-  Html(include_str!("../web/index.html"))
-}
-
-async fn app_js() -> impl IntoResponse {
-  (
-    [(
-      header::CONTENT_TYPE,
-      "application/javascript; charset=utf-8",
-    )],
-    include_str!("../web/app.js"),
-  )
-}
-
-async fn style_css() -> impl IntoResponse {
-  (
-    [(header::CONTENT_TYPE, "text/css; charset=utf-8")],
-    include_str!("../web/style.css"),
-  )
 }

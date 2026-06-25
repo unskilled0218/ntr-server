@@ -1,5 +1,5 @@
 //! my-ntr-server: a userless todo server using the todo.txt format,
-//! exposing a JSON HTTP API and serving a small self-contained WebUI.
+//! exposing a JSON HTTP API.
 
 pub mod api;
 pub mod atomicfile;

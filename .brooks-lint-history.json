@@ -669,5 +669,16 @@
       "suggestion": 1
     },
     "scope": "code: docker-compose branch vs main (re-review after loopback-publish fix)"
+  },
+  {
+    "date": "2026-06-25",
+    "mode": "PR Review",
+    "score": 99,
+    "findings": {
+      "critical": 0,
+      "warning": 0,
+      "suggestion": 1
+    },
+    "scope": "tasks/20-remove-gui/plan.md"
   }
 ]
