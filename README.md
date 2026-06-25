@@ -2,14 +2,13 @@
 
 A single-binary Rust todo server with no user/auth concept. Tasks are stored in
 a plain [todo.txt](https://github.com/todotxt/todo.txt) file (the canonical
-store), exposed over a JSON HTTP API for use by other programs, and served
-through a small self-contained WebUI.
+store), exposed over a JSON HTTP API for use by other programs.
 
 ## Run
 
 ```sh
 cargo run
-# then open http://127.0.0.1:8080
+# then call the API, e.g. curl http://127.0.0.1:8080/api/tasks
 ```
 
 Configuration (environment variables):
@@ -31,7 +30,7 @@ Configuration (environment variables):
 image — no Dockerfile to build:
 
 ```sh
-docker compose up                  # then open http://localhost:8080
+docker compose up                  # API on http://localhost:8080/api/...
 NTR_PORT=9000 docker compose up     # use a different port
 NTR_BIND=0.0.0.0 docker compose up  # reach it from other devices on your network
 ```
@@ -103,74 +102,18 @@ text, the scratchpad counterpart to the structured todo.txt — stored in its ow
 file, cached in memory, and written atomically (temp file + rename) just like the
 task store, so the file and memory never diverge. A missing file is treated as an
 empty note. There is no per-task note and no versioning; `PUT /api/note` is
-last-write-wins, the same as `PUT /api/raw` for the task file. The WebUI softens this for
-its own editor with a conflict prompt (see below), but the HTTP endpoint itself stays a
-plain overwrite.
+last-write-wins, the same as `PUT /api/raw` for the task file — a plain overwrite.
 
-## WebUI
+## Live updates
 
-The page at `/` is split into two panes: the **note** and the **todo**. The page fills the
-viewport without scrolling — each pane keeps its chrome fixed (the todo add and filter
-controls and the note status bar stay put) while the task list and the note editor scroll
-internally. On wide screens the two panes sit side by side. On narrow screens the app shows
-one pane at a time: a **bottom navigation bar** (Note / Todo) switches between them, and a
-horizontal **swipe** does the same — each view fills the screen above the bar. The note pane is a
-single **in-place live editor**: one surface where you type raw Markdown over `Note.md` and
-it renders as you type — headings grow, `**bold**` shows bold, `-` lists indent — while the
-syntax markers stay visible (dimmed) so the text is still raw Markdown you can edit. The
-client-side renderer supports a practical subset — headings, bold/italic, inline and fenced
-code, ordered and unordered lists (one level), blockquotes, horizontal rules, and links;
-unsupported syntax (tables, images, nested lists, raw HTML) shows as literal text. The
-rendering is purely a view: the stored file stays raw Markdown (the editor's text is exactly
-what is saved).
-
-The editor **auto-saves**: there is no Save button. Edits are written shortly after you
-stop typing (a short debounce), immediately when you leave the field, and best-effort
-when the page closes, so the note keeps itself saved. A status line tracks state —
-`Editing…`, `Saving…`, `Saved`, or a red load/save error (a failed save is retried on the
-next edit).
-
-**Live updates.** Every open page subscribes to `GET /api/events`, so a change made on one
-device (or to `todo.txt` / `Note.md` directly by another program) shows up on the others
-without a reload — the task list re-fetches, and an idle note editor adopts the new text.
-If the note changed elsewhere **while you have unsaved edits**, the editor cannot silently
-pick a winner, so it asks: a dialog shows your unsaved version next to the incoming one and
-you choose **Keep mine** (save your text over theirs) or **Use theirs** (discard your edits).
-Dismissing the dialog keeps your unsaved work. When there are no unsaved edits, saving is
-still last-write-wins, the same as `PUT /api/note`.
-
-The todo pane lists, filters, and edits tasks. The add form has a free-text
-description plus four native dropdown/picker controls beneath it, all styled
-alike — a priority dropdown (`A`–`C`), a due-date picker (written as a `due:`
-tag), and single-select `+project` and `@context` dropdowns — so common fields
-can be set by picking options instead of typing todo.txt syntax. The project and
-context dropdowns are populated from the labels already present in the file (a
-new label appears as an option once a task using it is saved; todo.txt has no
-separate label store), and each shows only its `None` (no-selection) option and
-"add" entry until the file contains at least one label of that kind.
-
-Each project/context dropdown begins with an `+ Add project...` / `+ Add
-context...` entry; choosing it opens a small modal with a single text input for a
-new label name. A valid name is staged client-side and selected immediately so it
-can be used on the next task add — it becomes a permanent label the moment a task
-using it is saved (todo.txt has no place to persist a label that no task uses, so
-a staged-but-unused name simply disappears on reload).
-
-Beneath the add form a row of dropdowns filters and sorts the list. A **Status**
-dropdown (`All` / `Active` / `Completed`) filters by completion, and **Project**
-and **Context** dropdowns — populated from the labels already in the file, each
-with an `All projects` / `All contexts` option — narrow the list to one label
-(both combine with AND). These three drive the server's `completed`, `project`,
-and `context` query params. A **Sort** dropdown reorders the list in the browser
-(no server round-trip): `File order` (the default, the server's order),
-`Priority`, `Due date`, `Created`, and `A-Z`; every key sorts ascending, sends
-tasks missing that field to the bottom, and breaks ties by file order.
-
-Two picker limits are UI-only and do not restrict the data model. The priority
-picker offers `A`–`C`, and the project/context dropdowns set at most one label
-each. Tasks created or edited as raw todo.txt (via the edit prompt or
-`PUT /api/raw`) may carry any `(A)`–`(Z)` priority and any number of `+projects`
-or `@contexts`; all of them are parsed, round-tripped, and displayed as-is.
+`GET /api/events` is a Server-Sent Events stream for clients that want to stay in sync
+without polling. Each time a resource changes it emits one `change` event whose payload is
+`tasks` or `note`; a subscriber reacts by re-fetching that resource through the normal GET
+endpoints. Changes are announced whether they come from the API itself (any mutation) or
+from an out-of-band edit to `todo.txt` / `Note.md` by another program — the server watches
+the files and broadcasts the difference. A subscriber that falls behind the buffer skips the
+missed events and re-syncs on its next event or on reconnect. The stream carries no auth and
+no payload beyond the resource name, matching the rest of the API.
 
 ## Development
 
