@@ -680,5 +680,16 @@
       "suggestion": 1
     },
     "scope": "tasks/20-remove-gui/plan.md"
+  },
+  {
+    "date": "2026-06-25",
+    "mode": "PR Review",
+    "score": 99,
+    "findings": {
+      "critical": 0,
+      "warning": 0,
+      "suggestion": 1
+    },
+    "scope": "remove-gui branch vs main (code)"
   }
 ]
