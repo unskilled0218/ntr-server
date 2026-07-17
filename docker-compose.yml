@@ -1,5 +1,5 @@
 # Run my-ntr-server with no Dockerfile: the official Rust image builds and runs the crate
-# from the mounted source. todo.txt and Note.md live in ./data on the host so they persist
+# from the mounted source. todo.txt, Note.md, and labels.json live in ./data on the host so they persist
 # and can be edited outside the container (the server watches them and updates clients live).
 # First `up` compiles the dependency tree (a few minutes); the cargo caches below make every
 # later start fast. Override the port with NTR_PORT, e.g. `NTR_PORT=9000 docker compose up`.
@@ -17,12 +17,13 @@ services:
       PORT: 8080
       TODO_FILE: /data/todo.txt
       NOTE_FILE: /data/Note.md
+      LABELS_FILE: /data/labels.json
       TODO_ADD_CREATION_DATE: "true"
     ports:
       - "0.0.0.0:8080:8080"
     volumes:
       - ./:/usr/src/app                                # source, so cargo can build (no Dockerfile)
-      - ./data:/data                                   # todo.txt + Note.md, editable from the host
+      - ./data:/data                                   # app data files, editable from the host
       - ntr-cargo-target:/usr/src/app/target          # build cache, isolated from the host target/
       - ntr-cargo-registry:/usr/local/cargo/registry  # crate download cache
     healthcheck:

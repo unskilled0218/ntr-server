@@ -8,6 +8,8 @@ pub struct Config {
   pub file: PathBuf,
   /// Path to the Markdown note file (env `NOTE_FILE`, default `Note.md`).
   pub note_file: PathBuf,
+  /// Path to the remembered labels file (env `LABELS_FILE`, default `labels.json`).
+  pub labels_file: PathBuf,
   /// Bind host (env `HOST`, default `127.0.0.1`).
   pub host: String,
   /// Bind port (env `PORT`, default `8080`).
@@ -22,6 +24,7 @@ impl Default for Config {
     Config {
       file: PathBuf::from("todo.txt"),
       note_file: PathBuf::from("Note.md"),
+      labels_file: PathBuf::from("labels.json"),
       host: "127.0.0.1".to_string(),
       port: 8080,
       add_creation_date: true,
@@ -40,6 +43,9 @@ impl Config {
       note_file: std::env::var_os("NOTE_FILE")
         .map(PathBuf::from)
         .unwrap_or(defaults.note_file),
+      labels_file: std::env::var_os("LABELS_FILE")
+        .map(PathBuf::from)
+        .unwrap_or(defaults.labels_file),
       host: std::env::var("HOST").unwrap_or(defaults.host),
       port: std::env::var("PORT")
         .ok()

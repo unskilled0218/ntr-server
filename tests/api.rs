@@ -4,6 +4,7 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use my_ntr_server::api::{router, AppState, Change};
 use my_ntr_server::config::Config;
+use my_ntr_server::labelstore::LabelStore;
 use my_ntr_server::note::NoteStore;
 use my_ntr_server::store::Store;
 use serde_json::Value;
@@ -27,14 +28,17 @@ fn app(tag: &str) -> axum::Router {
 fn app_with_state(tag: &str) -> (axum::Router, AppState) {
   let path = temp_path(tag);
   let note_path = temp_path(&format!("{tag}-note"));
+  let labels_path = temp_path(&format!("{tag}-labels"));
   let store = Store::load(&path).unwrap();
   let note = NoteStore::load(&note_path).unwrap();
+  let labels = LabelStore::load(&labels_path).unwrap();
   let config = Config {
     file: path,
     note_file: note_path,
+    labels_file: labels_path,
     ..Config::default()
   };
-  let state = AppState::new(store, note, config);
+  let state = AppState::new(store, note, labels, config);
   (router(state.clone()), state)
 }
 
@@ -63,6 +67,15 @@ fn put_text(uri: &str, body: &'static str) -> Request<Body> {
     .uri(uri)
     .header("content-type", "text/plain")
     .body(Body::from(body))
+    .unwrap()
+}
+
+fn put_json(uri: &str, body: Value) -> Request<Body> {
+  Request::builder()
+    .method("PUT")
+    .uri(uri)
+    .header("content-type", "application/json")
+    .body(Body::from(body.to_string()))
     .unwrap()
 }
 
@@ -273,6 +286,31 @@ async fn note_get_and_replace() {
   // GET returns the written text.
   let resp = app.oneshot(get("/api/note")).await.unwrap();
   assert_eq!(body_text(resp).await, "# Title\n\n- a note\n");
+}
+
+#[tokio::test]
+async fn labels_get_and_replace() {
+  let (app, state) = app_with_state("labels");
+
+  let resp = app.clone().oneshot(get("/api/labels")).await.unwrap();
+  assert_eq!(
+    body_json(resp).await,
+    serde_json::json!({ "project": [], "context": [] })
+  );
+
+  let expected = serde_json::json!({ "project": ["work"], "context": ["phone"] });
+  let resp = app
+    .clone()
+    .oneshot(put_json("/api/labels", expected.clone()))
+    .await
+    .unwrap();
+  assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+  let persisted: Value =
+    serde_json::from_str(&std::fs::read_to_string(&state.config.labels_file).unwrap()).unwrap();
+  assert_eq!(persisted, expected);
+
+  let resp = app.oneshot(get("/api/labels")).await.unwrap();
+  assert_eq!(body_json(resp).await, expected);
 }
 
 #[tokio::test]
