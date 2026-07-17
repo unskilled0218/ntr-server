@@ -4,6 +4,7 @@
 pub mod api;
 pub mod atomicfile;
 pub mod config;
+pub mod labelstore;
 pub mod note;
 pub mod store;
 pub mod task;

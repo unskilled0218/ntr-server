@@ -1,6 +1,7 @@
 //! HTTP API routes.
 
 use crate::config::Config;
+use crate::labelstore::{LabelStore, Labels};
 use crate::note::NoteStore;
 use crate::store::{Entry, Filter, Store, StoreError};
 use axum::extract::{Path, Query, State};
@@ -49,6 +50,7 @@ impl Change {
 pub struct AppState {
   pub store: Arc<RwLock<Store>>,
   pub note: Arc<RwLock<NoteStore>>,
+  pub labels: Arc<RwLock<LabelStore>>,
   pub config: Arc<Config>,
   /// Sender half of the live-update channel. The watcher (the sole producer) calls
   /// [`AppState::notify`]; each SSE client connection subscribes a fresh receiver.
@@ -56,11 +58,12 @@ pub struct AppState {
 }
 
 impl AppState {
-  pub fn new(store: Store, note: NoteStore, config: Config) -> Self {
+  pub fn new(store: Store, note: NoteStore, labels: LabelStore, config: Config) -> Self {
     let (tx, _rx) = broadcast::channel(EVENT_CHANNEL_CAPACITY);
     AppState {
       store: Arc::new(RwLock::new(store)),
       note: Arc::new(RwLock::new(note)),
+      labels: Arc::new(RwLock::new(labels)),
       config: Arc::new(config),
       tx,
     }
@@ -93,6 +96,7 @@ pub fn router(state: AppState) -> Router {
     .route("/api/tasks/{id}/uncomplete", post(uncomplete_task))
     .route("/api/raw", get(get_raw).put(put_raw))
     .route("/api/note", get(get_note).put(put_note))
+    .route("/api/labels", get(get_labels).put(put_labels))
     .route("/api/events", get(events))
     // No auth by design (userless server); permissive CORS lets other
     // programs and origins call the API. Bind to loopback unless trusted.
@@ -297,6 +301,20 @@ async fn put_note(State(state): State<AppState>, body: String) -> Result<StatusC
   let mut note = state.note.write().map_err(lock_err)?;
   note.replace(&body)?;
   state.notify(Change::Note);
+  Ok(StatusCode::NO_CONTENT)
+}
+
+async fn get_labels(State(state): State<AppState>) -> Result<Json<Labels>, AppError> {
+  let labels = state.labels.read().map_err(lock_err)?;
+  Ok(Json(labels.get()))
+}
+
+async fn put_labels(
+  State(state): State<AppState>,
+  Json(labels): Json<Labels>,
+) -> Result<StatusCode, AppError> {
+  let mut store = state.labels.write().map_err(lock_err)?;
+  store.replace(labels)?;
   Ok(StatusCode::NO_CONTENT)
 }
 

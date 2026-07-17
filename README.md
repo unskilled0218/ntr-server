@@ -17,6 +17,7 @@ Configuration (environment variables):
 | ------------------------ | ------------- | -------------------------------------------------- |
 | `TODO_FILE`              | `todo.txt`    | Path to the todo.txt file.                         |
 | `NOTE_FILE`              | `Note.md`     | Path to the free-form Markdown note file.          |
+| `LABELS_FILE`            | `labels.json` | Path to the remembered project/context labels.     |
 | `HOST`                   | `127.0.0.1`   | Bind address.                                      |
 | `PORT`                   | `8080`        | Bind port.                                         |
 | `TODO_ADD_CREATION_DATE` | `true`        | Stamp a creation date on new incomplete tasks.     |
@@ -40,9 +41,9 @@ default — it is unauthenticated, so exposing it to the network (`NTR_BIND=0.0.
 is a deliberate choice; do it only on a trusted network or behind an authenticating
 proxy.
 
-`todo.txt` and `Note.md` live in `./data` on the host, so they persist across
-restarts and can be edited out of band (the server watches them and pushes the
-changes to open clients). The first `up` compiles the dependencies (a few minutes);
+`todo.txt`, `Note.md`, and `labels.json` live in `./data` on the host, so they persist across
+restarts. The server watches out-of-band edits to `todo.txt` and `Note.md` and pushes those
+changes to open clients. The first `up` compiles the dependencies (a few minutes);
 the cargo build/registry caches are kept in named volumes, so later starts are fast.
 
 ## API
@@ -78,6 +79,8 @@ All task responses use this JSON shape:
 | `PUT /api/raw`                   | Replace the whole file from a `text/plain` body.  |
 | `GET /api/note`                  | The Markdown note as `text/markdown`.             |
 | `PUT /api/note`                  | Replace the note from a text body (`204`).        |
+| `GET /api/labels`                | Remembered projects and contexts as JSON.         |
+| `PUT /api/labels`                | Replace the remembered labels document (`204`).   |
 | `GET /api/events`                | Server-Sent Events stream of `change` events (`tasks` / `note`) for live updates. |
 
 ### Task ids
