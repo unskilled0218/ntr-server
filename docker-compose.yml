@@ -6,7 +6,7 @@
 # The server is published on 127.0.0.1 only by default (it is unauthenticated, like the app's
 # own loopback default); set NTR_BIND=0.0.0.0 to reach it from other devices on your network.
 services:
-  my-ntr-server:
+  ntr-server:
     image: rust:1-bookworm
     working_dir: /usr/src/app
     command: cargo run --release
