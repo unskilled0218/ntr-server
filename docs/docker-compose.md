@@ -1,6 +1,6 @@
 # Docker Compose
 
-Run commands from the server repository root. Compose pulls `git.lan/ntr/ntr-server:0.2.2`, a shared amd64/arm64 image; Docker selects the host's architecture. No source mount or Rust compiler is needed. The version must first be published through the [image release workflow](image-release.md).
+Run commands from the server repository root. Compose pulls `git.lan/ntr/ntr-server:0.2.3`, a shared amd64/arm64 image; Docker selects the host's architecture. No source mount or Rust compiler is needed. The version must first be published through the [image release workflow](image-release.md).
 
 ## Start
 
@@ -30,7 +30,7 @@ Tasks, notes, and remembered labels live in host `./data/todo.txt`, `./data/Note
 
 ## Configuration
 
-- `NTR_IMAGE`: complete image reference, default `git.lan/ntr/ntr-server:0.2.2`. Override with another registry/version or an index digest.
+- `NTR_IMAGE`: complete image reference, default `git.lan/ntr/ntr-server:0.2.3`. Override with another registry/version or an index digest.
 - `NTR_BIND`: host bind address, default `127.0.0.1`. Set `0.0.0.0` when intentional network access is needed; the server has no authentication.
 - `NTR_PORT`: host port, default `8080`. Container port remains `8080` and its internal `HOST` remains `0.0.0.0` so Docker port publishing works.
 - `NTR_UID` / `NTR_GID`: runtime numeric identity, default `1000` / `1000`.
@@ -48,7 +48,7 @@ The image itself retains all [server environment settings](configuration.md); th
 Back up `./data`, then choose a published version or index digest and use the same `NTR_IMAGE` value for pull and startup:
 
 ```sh
-export NTR_IMAGE=git.lan/ntr/ntr-server:0.2.2
+export NTR_IMAGE=git.lan/ntr/ntr-server:0.2.3
 docker compose pull
 docker compose up -d
 docker compose ps

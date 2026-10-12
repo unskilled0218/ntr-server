@@ -2,7 +2,7 @@
 # See docs/docker-compose.md for registry login, image overrides, and data permissions.
 services:
   ntr-server:
-    image: ${NTR_IMAGE:-git.lan/ntr/ntr-server:0.2.2}
+    image: ${NTR_IMAGE:-git.lan/ntr/ntr-server:0.2.3}
     user: "${NTR_UID:-1000}:${NTR_GID:-1000}"
     environment:
       # The app defaults to 127.0.0.1, which a published port cannot reach; bind all
