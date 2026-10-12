@@ -13,7 +13,6 @@ import signal
 import subprocess
 import sys
 import tempfile
-from urllib.parse import urlsplit
 
 
 PLATFORMS = ("linux/amd64", "linux/arm64")
@@ -87,11 +86,7 @@ def configuration():
     re.fullmatch(r"[a-z0-9]+(?:[._-][a-z0-9]+)*", part) for part in components[1:]
   ):
     raise ReleaseError("FORGEJO_IMAGE must be registry/owner/image, without a tag or digest")
-  api = os.environ.get("FORGEJO_API_URL", f"https://{registry}/api/v1").rstrip("/")
-  parsed = urlsplit(api)
-  if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
-    raise ReleaseError("FORGEJO_API_URL must be an HTTPS API base URL without credentials or query")
-  return token, registry, image, api
+  return token, registry, image
 
 
 def checkout_identity(commands):
@@ -115,22 +110,15 @@ def checkout_identity(commands):
   return matches[0]["version"], revision
 
 
-def login_name(commands, api, work):
+def login_name(commands):
   username = os.environ.get("FORGEJO_USERNAME", "")
   if not username:
-    response = work / "user.json"
-    escaped = commands.token.replace("\\", "\\\\").replace('"', '\\"')
-    status = commands.run(
-      "curl", "--silent", "--show-error", "--proto", "=https",
-      "--connect-timeout", "15", "--max-time", "60", "--config", "-",
-      "--output", str(response), "--write-out", "%{http_code}", f"{api}/user",
-      data=f'header = "Authorization: token {escaped}"\n',
-    ).stdout.strip()
-    if status != "200":
-      raise ReleaseError(f"Forgejo login lookup returned HTTP {status}; supply FORGEJO_USERNAME or a token with read:user")
-    username = object_json(response.read_text(), "Forgejo user").get("login", "")
+    result = commands.run("git", "config", "--get", "user.name", check=False)
+    if result.returncode not in (0, 1):
+      raise ReleaseError("Could not read git config user.name; set FORGEJO_USERNAME")
+    username = result.stdout.strip() if result.returncode == 0 else ""
   if not isinstance(username, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", username):
-    raise ReleaseError("Missing or invalid Forgejo login name; set FORGEJO_USERNAME")
+    raise ReleaseError("Missing or invalid Forgejo login name; set git config user.name to your Forgejo login or set FORGEJO_USERNAME")
   return username
 
 
@@ -332,8 +320,8 @@ def report(reference, verified, version, revision, reused=False):
 
 
 def release(root):
-  token, host, image, api = configuration()
-  for command in ("git", "cargo", "curl", "docker"):
+  token, host, image = configuration()
+  for command in ("git", "cargo", "docker"):
     if not shutil.which(command):
       raise ReleaseError(f"Required command is not installed: {command}")
   commands = Commands(root, token)
@@ -342,7 +330,7 @@ def release(root):
   with tempfile.TemporaryDirectory(prefix="ntr-image-release-") as directory:
     work = Path(directory)
     builder = isolate_docker(commands, work)
-    username = login_name(commands, api, work)
+    username = login_name(commands)
     commands.run("docker", "login", host, "--username", username, "--password-stdin", data=token + "\n")
     registry = Registry(commands, image, version, revision)
     existing = registry.inspect(reference, allow_missing=True)

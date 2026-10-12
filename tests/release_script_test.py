@@ -1,4 +1,4 @@
-"""Behavioral release tests using real Git/Bash and disposable engine/API seams."""
+"""Behavioral release tests using real Git/Bash and disposable engine seams."""
 
 import json
 import os
@@ -30,7 +30,7 @@ args = sys.argv[1:]
 state_path = Path(os.environ["FIXTURE_STATE"])
 state = json.loads(state_path.read_text())
 scenario = state.get("scenario", {})
-input_text = sys.stdin.read() if tool == "curl" or (tool == "docker" and args[:1] == ["login"]) else ""
+input_text = sys.stdin.read() if tool == "docker" and args[:1] == ["login"] else ""
 docker_config = os.environ.get("DOCKER_CONFIG")
 event = {"tool": tool, "args": args, "stdin": input_text, "docker_config": docker_config,
          "buildx_config": os.environ.get("BUILDX_CONFIG"), "builder": os.environ.get("BUILDX_BUILDER"),
@@ -64,13 +64,6 @@ if tool == "cargo":
       Path("src/main.rs").write_text("changed during tests")
     print("fixture cargo tests passed")
     sys.exit(0)
-
-if tool == "curl":
-  Path(args[args.index("--output") + 1]).write_text(
-    "not JSON" if scenario.get("user_json") else json.dumps({"login": scenario.get("login", "dev")})
-  )
-  print(scenario.get("user_status", "200"), end="")
-  sys.exit(0)
 
 if tool != "docker":
   fail("unexpected tool")
@@ -211,6 +204,7 @@ class ReleaseScriptTests(unittest.TestCase):
     (self.root / "src/main.rs").write_text("fn main() {}\n")
     self.git = shutil.which("git")
     self.git_run("init", "-q", "-b", "main")
+    self.git_run("config", "user.name", "fixture-login")
     self.git_run("add", ".")
     self.git_run("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "Fixture checkout")
     self.revision = self.git_run("rev-parse", "HEAD").stdout.strip()
@@ -219,7 +213,7 @@ class ReleaseScriptTests(unittest.TestCase):
     helper = self.bin / "fake.py"
     helper.write_text(f"#!{sys.executable}\n" + TOOLS)
     helper.chmod(0o755)
-    for tool in ("docker", "curl", "cargo"):
+    for tool in ("docker", "cargo"):
       (self.bin / tool).symlink_to(helper)
     for tool in ("git", "bash", "dirname", "python3"):
       (self.bin / tool).symlink_to(shutil.which(tool))
@@ -281,8 +275,8 @@ class ReleaseScriptTests(unittest.TestCase):
         self.assertEqual(len(self.builds()), 1)
         login = next(call for call in self.calls if call["args"][:1] == ["login"])
         self.assertEqual(login["stdin"], TOKEN + "\n")
-        lookup = next(call for call in self.calls if call["tool"] == "curl")
-        self.assertIn(TOKEN, lookup["stdin"])
+        self.assertEqual(login["args"][login["args"].index("--username") + 1], "fixture-login")
+        self.assertFalse(any(call["tool"] == "curl" for call in self.calls))
         configs = [call["args"][3] for call in self.calls if "{{json .Image}}" in call["args"]]
         self.assertEqual(configs, ["git.lan/ntr/ntr-server@" + AMD64, "git.lan/ntr/ntr-server@" + ARM64])
 
@@ -295,6 +289,8 @@ class ReleaseScriptTests(unittest.TestCase):
     })
     self.assertEqual(result.returncode, 0, result.stderr)
     self.assertFalse(any(call["tool"] == "curl" for call in self.calls))
+    login = next(call for call in self.calls if call["args"][:1] == ["login"])
+    self.assertEqual(login["args"][login["args"].index("--username") + 1], "publisher")
     self.assertIn("forgejo.invalid:3000/team/server:0.2.2", result.stdout)
     exports = [call["args"][2] for call in self.calls if call["args"][:2] == ["context", "export"]]
     self.assertEqual(exports, ["arm-node", "remote-engine"])
@@ -352,18 +348,16 @@ class ReleaseScriptTests(unittest.TestCase):
     for env in ({"FORGEJO_IMAGE": "git.lan/ntr/server:latest"},
                 {"FORGEJO_IMAGE": "elsewhere.invalid/ntr/server"},
                 {"FORGEJO_REGISTRY": "https://git.lan"},
-                {"FORGEJO_API_URL": "http://git.lan/api/v1"},
                 {"FORGEJO_TOKEN": "token\nheader"}):
       with self.subTest(env=env):
         result = self.invoke(env=env)
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse(self.calls)
 
-  def test_builder_login_lookup_and_build_failures_do_not_succeed(self):
+  def test_builder_login_and_build_failures_do_not_succeed(self):
     scenarios = (
       {"daemon_failure": True}, {"buildx_missing": True}, {"driver": "docker"},
-      {"platform_missing": True}, {"builder_changed": True}, {"user_status": "403"},
-      {"user_json": True}, {"login": None}, {"login_failure": True},
+      {"platform_missing": True}, {"builder_changed": True}, {"login_failure": True},
       {"test_failure": True}, {"build_failure": True}, {"push_failure": True},
       {"change_checkout": True}, {"version": "not-a-tag"},
     )
@@ -386,6 +380,18 @@ class ReleaseScriptTests(unittest.TestCase):
         result = self.invoke(scenario)
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse(self.builds())
+
+  def test_missing_or_invalid_git_username_requires_an_explicit_override(self):
+    for username in ("", "Display Name"):
+      with self.subTest(username=username):
+        self.git_run("config", "user.name", username)
+        result = self.invoke()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("git config user.name", result.stderr)
+        self.assertFalse(any(call["args"][:1] == ["login"] for call in self.calls))
+        self.assertFalse(self.builds())
+        result = self.invoke(env={"FORGEJO_USERNAME": "publisher"})
+        self.assertEqual(result.returncode, 0, result.stderr)
 
   def test_malformed_incomplete_or_conflicting_indexes_are_not_overwritten(self):
     for flag in ("manifest_json", "index_incomplete", "index_duplicate", "unmarked_attestation",

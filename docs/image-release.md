@@ -5,9 +5,9 @@ The publisher builds `linux/amd64` and `linux/arm64` and pushes one versioned im
 ## Prerequisites
 
 - A clean, committed server `main` checkout; only the server submodule's state is checked.
-- Bash, Git, Cargo, Python 3, curl, Docker, and the Docker Buildx plugin. Deployment also needs Docker Compose.
+- Bash, Git, Cargo, Python 3, Docker, and the Docker Buildx plugin. Deployment also needs Docker Compose.
 - An existing `docker-container` builder named `ntr-release` with running nodes supporting both platforms, either natively or through preconfigured BuildKit emulation. BuildKit's emulation support for building does not necessarily enable running ARM64 containers on an amd64 engine.
-- A Forgejo token with `write:package` and permission to publish under owner `ntr`. Token-only login-name lookup also requires `read:user`. A repository-release token with only repository-write access is insufficient.
+- A Forgejo token with `write:package` and permission to publish under owner `ntr`. A repository-release token with only repository-write access is insufficient.
 - Working HTTPS trust and network access from the Docker client and builder to the registry. The script does not disable TLS verification, install emulation, create a builder, or change host configuration.
 
 The CLI contracts are based on Docker's documented Buildx commands and the Buildx 0.13+ formatter/source interface. No real Docker/Buildx version has been runtime-tested in the implementation environment, which lacks Docker. Validate the commands and missing-manifest diagnostic against your installed version before the first live release; unrecognized errors stop publication.
@@ -35,7 +35,7 @@ FORGEJO_TOKEN="$(<"$HOME/.config/forgejo/forgejo-token")" server/scripts/release
 
 From the server repository root, use `scripts/release.sh` instead. The entry point locates its own repository, so either absolute invocation also works from another directory.
 
-The token-only command resolves the token user's login through the Forgejo API. To avoid the optional `read:user` permission and API lookup, supply the actual token owner's username:
+The token-only command reads the login from `git config --get user.name` in the server checkout, honoring Git's local/global configuration precedence. That value must be the token owner's Forgejo login, not a display name containing spaces. No API lookup or `read:user` permission is needed. To use a different login without changing Git author configuration, supply it explicitly:
 
 ```bash
 FORGEJO_USERNAME=your-login FORGEJO_TOKEN="$(<"$HOME/.config/forgejo/forgejo-token")" scripts/release.sh
@@ -47,8 +47,7 @@ Configuration:
 
 - `FORGEJO_REGISTRY`: lowercase host and optional port, default `git.lan`; no URL scheme.
 - `FORGEJO_IMAGE`: untagged `registry/owner/image` repository, default `<registry>/ntr/ntr-server`; it must use the configured registry. Names use lowercase alphanumeric components with single dot, underscore, or hyphen separators. Tags and digests are supplied by the script.
-- `FORGEJO_USERNAME`: token owner's login; absent means authenticated API lookup.
-- `FORGEJO_API_URL`: HTTPS API base, default `https://<registry>/api/v1`; used only for username lookup.
+- `FORGEJO_USERNAME`: token owner's login; defaults to the server checkout's effective Git `user.name`. Missing or invalid login names stop publication.
 - `BUILDX_BUILDER` is forced to `ntr-release` for the publisher's Docker commands. `BUILDX_CONFIG`, `DOCKER_CONFIG`, and Docker engine/context/TLS environment variables retain their normal connection meanings. The initial supported driver is `docker-container`.
 
 The publisher selects `my-ntr-server` from Cargo metadata, runs `cargo test --locked`, checks the checkout again, and invokes Buildx with `--platform linux/amd64,linux/arm64 --push`. Each platform gets the same OCI version, full Git revision, and source labels. It records the build metadata index digest, validates both platform configurations by immutable digest, and checks the version tag still points to that built index before reporting success.
