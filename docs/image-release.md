@@ -54,6 +54,13 @@ The publisher selects `my-ntr-server` from Cargo metadata, runs `cargo test --lo
 
 Success prints the versioned image reference, index digest, both platform manifest digests, version, and revision. Compose uses the shared tag or index digest and selects the correct architecture automatically. Cargo.lock fixes Rust dependency versions, but mutable base-image tags mean identical source revisions do not guarantee byte-identical rebuilds.
 
+Timestamped progress messages go to stderr for checkout validation, builder/context setup, registry login, tag inspection, tests, build/push, platform verification, and cleanup. Cargo tests, builder bootstrap, and Buildx plain-progress output stream as complete lines arrive, including diagnostics from failed commands. The publisher redacts the supplied token and never logs login stdin. Final release references and digests remain on stdout. To save both streams while retaining the publisher's failure status, run from Bash:
+
+```bash
+set -o pipefail
+FORGEJO_TOKEN="$(<"$HOME/.config/forgejo/forgejo-token")" server/scripts/release.sh 2>&1 | tee release.log
+```
+
 ## Failure and reruns
 
 Missing tools/credentials, unsupported builder drivers/platforms, tests, login, builds, pushes, and verification failures return nonzero. A failed export may have uploaded intermediate blobs or even committed an index before a connection failure; inspect the registry before deciding what happened.
