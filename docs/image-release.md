@@ -1,6 +1,6 @@
 # Container image releases
 
-The publisher builds `linux/amd64` and `linux/arm64`, pushes one versioned image index to Forgejo Packages, and uploads `img.tar.gz` and `img.tar.gz.sha256` to the server repository's Forgejo Release. The default image is `git.lan/ntr/ntr-server:<Cargo version>`, currently `0.2.3`; the release tag is `v0.2.3`. Forgejo creates the remote Git tag at the server revision when necessary. The script does not push source or publish a mutable `latest` alias.
+The publisher builds `linux/amd64` and `linux/arm64`, pushes one versioned image index to Forgejo Packages, and uploads `img.tar.gz` and `img.tar.gz.sha256` to the server repository's Forgejo Release. The default image is `git.lan/ntr/ntr-server:<Cargo version>`, currently `0.2.4`; the release tag is `v0.2.4`. Forgejo creates the remote Git tag at the server revision when necessary. The script does not push source or publish a mutable `latest` alias.
 
 ## Prerequisites
 
@@ -89,7 +89,7 @@ The registry downloader supports Basic authentication and the registry's Bearer-
 This is a multi-platform OCI archive. Classic Docker image stores cannot reliably load its full index through `docker load`. An OCI-capable Docker image store can import it directly after checksum verification:
 
 ```sh
-cd server/release/0.2.3
+cd server/release/0.2.4
 sha256sum -c img.tar.gz.sha256
 docker image load -i img.tar.gz
 docker image ls
@@ -125,8 +125,8 @@ cargo test --locked
 For local runtime checks, build distinct single-platform smoke images with `--load` (rather than trying to load the combined index into a classic Docker image store):
 
 ```sh
-docker buildx build --builder ntr-release --platform linux/amd64 --load --build-arg VERSION=0.2.3 --build-arg REVISION="$(git rev-parse HEAD)" -t ntr-server:smoke-amd64 .
-docker buildx build --builder ntr-release --platform linux/arm64 --load --build-arg VERSION=0.2.3 --build-arg REVISION="$(git rev-parse HEAD)" -t ntr-server:smoke-arm64 .
+docker buildx build --builder ntr-release --platform linux/amd64 --load --build-arg VERSION=0.2.4 --build-arg REVISION="$(git rev-parse HEAD)" -t ntr-server:smoke-amd64 .
+docker buildx build --builder ntr-release --platform linux/arm64 --load --build-arg VERSION=0.2.4 --build-arg REVISION="$(git rev-parse HEAD)" -t ntr-server:smoke-arm64 .
 ```
 
 Run each on a matching native engine or configured emulator with disposable data, check `/api/health`, update tasks/note/labels, recreate the container, and confirm persistence and external task/note edits. Record native versus emulated execution. For live publication, inspect the reported index and explicitly pull both architectures by that same index digest, then repeat the runtime checks and verify a same-revision rerun.
