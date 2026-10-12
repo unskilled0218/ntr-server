@@ -17,6 +17,7 @@ from urllib.parse import urlsplit
 
 
 PLATFORMS = ("linux/amd64", "linux/arm64")
+RELEASE_BUILDER = "ntr-release"
 INDEX_TYPES = {
   "application/vnd.oci.image.index.v1+json",
   "application/vnd.docker.distribution.manifest.list.v2+json",
@@ -133,25 +134,23 @@ def login_name(commands, api, work):
   return username
 
 
-def builder_info(commands, name=None, bootstrap=False):
+def builder_info(commands, name, bootstrap=False):
   if bootstrap:
     commands.run("docker", "buildx", "inspect", name, "--bootstrap")
   # `inspect` has no --format; explicitly include Current because older Buildx
   # versions omit it from the embedded Builder object's JSON representation.
   output = commands.run("docker", "buildx", "ls", "--format", BUILDER_FORMAT).stdout
   builders = [object_json(line, "Buildx builder") for line in output.splitlines() if line.strip()]
-  matches = [item for item in builders if isinstance(item.get("Builder"), dict) and item["Builder"].get("Name") == name] if name else [
-    item for item in builders if item.get("Current") is True
-  ]
+  matches = [item for item in builders if isinstance(item.get("Builder"), dict) and item["Builder"].get("Name") == name]
   # A node may share its builder's name, producing the same wrapper twice.
   matches = list({json.dumps(item, sort_keys=True): item for item in matches}.values())
   if len(matches) != 1:
-    raise ReleaseError("Could not identify one selected builder; set BUILDX_BUILDER")
+    raise ReleaseError(f"Could not identify builder {name}; create it with docker buildx create --name {name} --driver docker-container")
   info = matches[0].get("Builder")
   if not isinstance(info, dict):
     raise ReleaseError("Invalid Buildx builder object")
   if info.get("Driver") != "docker-container":
-    raise ReleaseError("Select an existing docker-container builder with BUILDX_BUILDER; other drivers are unsupported")
+    raise ReleaseError(f"Builder {name} must use the docker-container driver; other drivers are unsupported")
   if not isinstance(info.get("Name"), str) or not info["Name"]:
     raise ReleaseError("Buildx did not return a builder name")
   return info
@@ -164,13 +163,14 @@ def isolate_docker(commands, work):
   # to the caller's directory. Normalize them before invoking Docker at all.
   commands.env["DOCKER_CONFIG"] = str(original)
   commands.env["BUILDX_CONFIG"] = str(state)
+  commands.env["BUILDX_BUILDER"] = RELEASE_BUILDER
   if commands.env.get("DOCKER_CERT_PATH"):
     commands.env["DOCKER_CERT_PATH"] = str(Path(commands.env["DOCKER_CERT_PATH"]).resolve())
   config_file = original / "config.json"
   config = object_json(config_file.read_text(), "Docker configuration") if config_file.exists() else {}
   commands.run("docker", "buildx", "version")
   commands.run("docker", "info")
-  selected = builder_info(commands, commands.env.get("BUILDX_BUILDER"))
+  selected = builder_info(commands, RELEASE_BUILDER)
   name = selected["Name"]
   context = commands.run("docker", "context", "show").stdout.strip()
   contexts = {context}

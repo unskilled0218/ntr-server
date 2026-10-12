@@ -104,7 +104,7 @@ if args[:2] == ["buildx", "version"]:
   print("github.com/docker/buildx fixture-contract-version")
   sys.exit(0)
 if args[:2] == ["buildx", "inspect"]:
-  if args != ["buildx", "inspect", "release-builder", "--bootstrap"]:
+  if args != ["buildx", "inspect", "ntr-release", "--bootstrap"]:
     fail("invalid inspect flags or wrong builder")
   sys.exit(0)
 if args[:3] == ["buildx", "ls", "--format"]:
@@ -116,8 +116,8 @@ if args[:3] == ["buildx", "ls", "--format"]:
   platforms = ["linux/amd64", "linux/arm64/v8"]
   if scenario.get("platform_missing"):
     platforms = ["linux/amd64"]
-  name = "changed-builder" if scenario.get("builder_changed") and docker_config != os.environ["ORIGINAL_DOCKER_CONFIG"] else "release-builder"
-  emit({"Current": True, "Builder": {"Name": name, "Driver": scenario.get("driver", "docker-container"),
+  name = "changed-builder" if scenario.get("builder_changed") and docker_config != os.environ["ORIGINAL_DOCKER_CONFIG"] else "ntr-release"
+  emit({"Current": False, "Builder": {"Name": name, "Driver": scenario.get("driver", "docker-container"),
         "Nodes": [{"Name": "node0", "Endpoint": "remote-engine", "Status": "running", "Platforms": platforms},
                   {"Name": "node1", "Endpoint": "arm-node", "Status": "running", "Platforms": []}]}})
 if args[:1] == ["login"]:
@@ -136,7 +136,7 @@ if args[:2] == ["buildx", "build"]:
     fail("arm64 build failed fixture-token-never-print")
   if "--load" in args or args[args.index("--platform") + 1] != "linux/amd64,linux/arm64":
     fail("incorrect platform/export request")
-  if args[args.index("--builder") + 1] != "release-builder":
+  if args[args.index("--builder") + 1] != "ntr-release":
     fail("wrong build instance")
   if scenario.get("push_failure"):
     fail("registry export failed")
@@ -290,7 +290,7 @@ class ReleaseScriptTests(unittest.TestCase):
     state = self.work / "custom-buildx-state"
     result = self.invoke(env={
       "FORGEJO_USERNAME": "publisher", "FORGEJO_REGISTRY": "forgejo.invalid:3000",
-      "FORGEJO_IMAGE": "forgejo.invalid:3000/team/server", "BUILDX_BUILDER": "release-builder",
+      "FORGEJO_IMAGE": "forgejo.invalid:3000/team/server", "BUILDX_BUILDER": "other-builder",
       "BUILDX_CONFIG": str(state), "EXPECTED_BUILDX_CONFIG": str(state),
     })
     self.assertEqual(result.returncode, 0, result.stderr)
@@ -299,6 +299,7 @@ class ReleaseScriptTests(unittest.TestCase):
     exports = [call["args"][2] for call in self.calls if call["args"][:2] == ["context", "export"]]
     self.assertEqual(exports, ["arm-node", "remote-engine"])
     self.assertTrue(all(call["docker_host"] == "tcp://fixture-engine:2376" for call in self.calls))
+    self.assertTrue(all(call["builder"] == "ntr-release" for call in self.calls if call["tool"] == "docker"))
 
   def test_existing_complete_index_is_reused_without_build_or_test(self):
     result = self.invoke({"existing": True})
