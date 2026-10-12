@@ -5,12 +5,12 @@ The publisher builds `linux/amd64` and `linux/arm64`, pushes one versioned image
 ## Prerequisites
 
 - A clean, committed server `main` checkout whose revision is already pushed to the server's Forgejo repository; only the server submodule's state is checked.
-- Bash, Git, Cargo, Python 3.9+, curl, Skopeo, Docker, and the Docker Buildx plugin. Install Skopeo yourself if unavailable. Deployment also needs Docker Compose.
+- Bash, Git, Cargo, Python 3.9+, curl, Docker, and the Docker Buildx plugin. Skopeo is not required. Deployment also needs Docker Compose.
 - An engine supporting a `docker-container` builder with both platforms, either natively or through preconfigured BuildKit emulation. The script creates `ntr-release` if missing. BuildKit's emulation support for building does not necessarily enable running ARM64 containers on an amd64 engine.
 - A Forgejo token with `write:package`, `write:repository`, package-owner access, and server-repository release access. A token limited to either packages or repository releases is insufficient.
-- Working HTTPS trust and network access from the Docker client, builder, curl, and Skopeo. The script never disables TLS verification, installs system tools/emulation, or changes daemon trust.
+- Working HTTPS trust and network access from the Docker client, builder, and curl. The script never disables TLS verification, installs system tools/emulation, or changes daemon trust.
 
-The CLI contracts use Docker's documented Buildx commands and the Buildx 0.13+ formatter/source interface. Formatter checks ran with Docker 29.9.0 and Buildx 0.38.0; full publication and real Skopeo export remain unverified in the implementation environment. Validate the missing-manifest diagnostic against your installed version before the first live release; unrecognized errors stop publication.
+The CLI contracts use Docker's documented Buildx commands and the Buildx 0.13+ formatter/source interface. Formatter checks ran with Docker 29.9.0 and Buildx 0.38.0; full publication and live authenticated registry export remain unverified in the implementation environment. Validate the missing-manifest diagnostic against your installed version before the first live release; unrecognized errors stop publication.
 
 ## Builder setup
 
@@ -58,7 +58,7 @@ Configuration:
 - `FORGEJO_IMAGE`: untagged `registry/owner/image` repository, default `<registry>/ntr/ntr-server`; it must use the configured registry. Names use lowercase alphanumeric components with single dot, underscore, or hyphen separators. Tags and digests are supplied by the script.
 - `FORGEJO_USERNAME`: token owner's login; defaults to the server checkout's effective Git `user.name`. Missing or invalid login names stop publication.
 - `FORGEJO_API_URL`: complete repository API URL, default `https://<registry>/api/v1/repos/ntr/ntr-server`. Set this explicitly if the image override belongs to another source repository.
-- `FORGEJO_CA_FILE`: optional existing CA certificate bundle used for curl API/download requests and Skopeo registry export. For a custom CA not in their system trust, set this to the same CA referenced by BuildKit. Docker login and Buildx inspection still require the Docker client's existing registry trust.
+- `FORGEJO_CA_FILE`: optional existing CA certificate bundle used for curl API requests and registry downloads. Installed system CA certificates are used by default; no setting is needed when your custom CA is already trusted there. Otherwise set this to the same CA referenced by BuildKit. Docker login and Buildx inspection still require the Docker client's existing registry trust.
 - `BUILDKIT_CONFIG`: existing BuildKit configuration used only when creating a missing builder; default `~/.config/buildkit/buildkitd.toml` when present.
 - `BUILDX_BUILDER` is forced to `ntr-release` for the publisher's Docker commands. `BUILDX_CONFIG`, `DOCKER_CONFIG`, and Docker engine/context/TLS environment variables retain their normal connection meanings. The initial supported driver is `docker-container`.
 
@@ -75,7 +75,7 @@ FORGEJO_CA_FILE=/absolute/path/to/forgejo-ca.crt \
 
 ## Image archive attachments
 
-After registry verification, Skopeo exports the immutable index using `copy --all --preserve-digests`. The script compresses the OCI archive, validates blob checksums and the complete referenced graph including both platform manifests, and writes:
+After registry verification, curl downloads the immutable index and all referenced manifests, configurations, and layers through the registry's HTTPS API. Python verifies each downloaded digest and writes a compressed OCI image layout without rebuilding or changing manifest bytes. The export includes both architectures and attestation descriptors. No Skopeo or additional image-copy tool is used. Output files:
 
 ```text
 server/release/<version>/img.tar.gz
@@ -84,13 +84,15 @@ server/release/<version>/img.tar.gz.sha256
 
 Both files are uploaded to Forgejo Release `v<version>` in `ntr/ntr-server`. The SHA-256 file checks the compressed archive and names `img.tar.gz`. The release description records the image index and Git revision; both the description and resolved remote tag must match before attachments are reused. Existing conflicting Git tags/releases are rejected. Generated local files are ignored by Git and stay outside the Docker build context.
 
-This is a multi-platform OCI archive. Classic Docker image stores cannot reliably load its full index through `docker load`. Verify the checksum, decompress, and use an OCI-capable importer such as Skopeo:
+The registry downloader supports Basic authentication and the registry's Bearer-token challenge. Tokens travel through curl configuration on stdin, not command arguments. Token endpoints must use the registry's HTTPS host. HTTPS redirects to external blob storage are followed without forwarding registry credentials; HTTP redirects are rejected. Registry downloads ignore `.curlrc` so it cannot inject credentials or insecure options. Custom registry CA overrides apply to the registry host; external storage uses system trust.
+
+This is a multi-platform OCI archive. Classic Docker image stores cannot reliably load its full index through `docker load`. An OCI-capable Docker image store can import it directly after checksum verification:
 
 ```sh
 cd server/release/0.2.2
 sha256sum -c img.tar.gz.sha256
-gzip -dc img.tar.gz > img.tar
-skopeo inspect --raw oci-archive:img.tar
+docker image load -i img.tar.gz
+docker image ls
 ```
 
 Timestamped progress messages go to stderr for checkout validation, builder/context setup, registry login, tag inspection, tests, build/push, platform verification, and cleanup. Cargo tests, builder bootstrap, and Buildx plain-progress output stream as complete lines arrive, including diagnostics from failed commands. The publisher redacts the supplied token and never logs login stdin. Final release references and digests remain on stdout. To save both streams while retaining the publisher's failure status, run from Bash:

@@ -1,6 +1,7 @@
 """Behavioral release tests using real Git/Bash and disposable engine seams."""
 
 import json
+import base64
 import hashlib
 import io
 import os
@@ -27,6 +28,7 @@ from pathlib import Path
 import signal
 import subprocess
 import sys
+import tarfile
 import time
 from urllib.parse import urlsplit, parse_qs, unquote
 
@@ -57,26 +59,59 @@ def emit(value):
   print(json.dumps(value))
   sys.exit(0)
 
-if tool == "skopeo":
-  if scenario.get("export_failure"):
-    fail("archive export failed fixture-token-never-print")
-  if args[:4] != ["copy", "--all", "--preserve-digests", "--src-authfile"]:
-    fail("archive export must preserve all platform digests")
-  if args[-2] != "docker://" + state["image"] + "@" + index:
-    fail("archive export is not digest pinned")
-  config = json.loads(Path(args[4]).read_text())
-  if state["image"].split("/")[0] not in config.get("auths", {}):
-    fail("missing temporary registry login")
-  Path(args[-1].removeprefix("oci-archive:")).write_bytes(
-    b"corrupted" if scenario.get("archive_corrupt") else Path(os.environ["FIXTURE_ARCHIVE"]).read_bytes()
-  )
-  sys.exit(0)
-
 if tool == "curl":
   url = args[-1]
   parsed = urlsplit(url)
   path = parsed.path
   output = Path(args[args.index("--output") + 1])
+  if path.startswith("/v2/") or parsed.netloc == "storage.invalid":
+    def reply(status, content=b"", headers=None):
+      header_file = Path(args[args.index("--dump-header") + 1])
+      header_file.write_text("HTTP/2 " + status + "\r\n" + "".join(
+        key + ": " + value + "\r\n" for key, value in (headers or {}).items()
+      ) + "\r\n")
+      output.write_bytes(content)
+      print(status, end="")
+      sys.exit(0)
+    if path == "/v2/token":
+      if scenario.get("token_denied"):
+        reply("403")
+      credentials = base64.b64encode((os.environ.get("FORGEJO_USERNAME", "fixture-login") + ":fixture-token-never-print").encode()).decode()
+      if "Authorization: Basic " + credentials not in input_text:
+        fail("missing basic authentication for registry token")
+      scope = parse_qs(parsed.query).get("scope", [])
+      if scope != ["repository:" + state["image"].split("/", 1)[1] + ":pull"]:
+        fail("wrong registry pull scope")
+      reply("200", json.dumps({"access_token": "registry-bearer-sensitive"}).encode())
+    if parsed.netloc == "storage.invalid":
+      if input_text:
+        fail("credentials forwarded to external blob storage")
+    elif not scenario.get("registry_basic") and "Authorization: Bearer registry-bearer-sensitive" not in input_text:
+      host = "untrusted.invalid" if scenario.get("untrusted_realm") else parsed.netloc
+      if scenario.get("token_default_port"):
+        host += ":443"
+      reply("401", headers={"WWW-Authenticate": 'Bearer realm="https://' + host + '/v2/token",service="container_registry",scope="repository:ignored:pull"'})
+    if scenario.get("registry_command_error"):
+      fail("registry transport failed registry-bearer-sensitive")
+    if scenario.get("export_failure"):
+      reply("503")
+    if scenario.get("redirect_loop"):
+      reply("307", headers={"Location": url})
+    digest = path.rsplit("/", 1)[1]
+    try:
+      with tarfile.open(os.environ["FIXTURE_ARCHIVE"], "r") as archive:
+        content = archive.extractfile("blobs/sha256/" + digest.split(":", 1)[1]).read()
+    except KeyError:
+      reply("404")
+    if scenario.get("archive_corrupt"):
+      content = b"corrupted download"
+    if content == b"fixture compressed layer contents" and parsed.netloc != "storage.invalid":
+      if scenario.get("blob_denied"):
+        reply("403")
+      if scenario.get("external_redirect") or scenario.get("http_redirect"):
+        scheme = "http" if scenario.get("http_redirect") else "https"
+        reply("307", headers={"Location": scheme + "://storage.invalid/blobs/" + digest})
+    reply("200", content)
   status = "200"
   value = {}
   if scenario.get("api_denied"):
@@ -350,7 +385,7 @@ class ReleaseScriptTests(unittest.TestCase):
     helper = self.bin / "fake.py"
     helper.write_text(f"#!{sys.executable}\n" + TOOLS)
     helper.chmod(0o755)
-    for tool in ("docker", "cargo", "curl", "skopeo"):
+    for tool in ("docker", "cargo", "curl"):
       (self.bin / tool).symlink_to(helper)
     for tool in ("git", "bash", "dirname", "python3"):
       (self.bin / tool).symlink_to(shutil.which(tool))
@@ -392,9 +427,12 @@ class ReleaseScriptTests(unittest.TestCase):
     )
     self.calls = [json.loads(line) for line in self.events.read_text().splitlines()]
     self.assertNotIn(TOKEN, result.stdout + result.stderr)
+    self.assertNotIn("registry-bearer-sensitive", result.stdout + result.stderr)
     self.assertEqual((self.original / "config.json").read_text(), self.original_config)
     for call in self.calls:
       self.assertNotIn(TOKEN, " ".join(call["args"]))
+      self.assertNotIn("registry-bearer-sensitive", " ".join(call["args"]))
+      self.assertNotIn(base64.b64encode(("fixture-login:" + TOKEN).encode()).decode(), " ".join(call["args"]))
       self.assertIsNone(call["token_env"])
       isolated = call.get("docker_config")
       if isolated and isolated != str(self.original):
@@ -536,13 +574,14 @@ class ReleaseScriptTests(unittest.TestCase):
     state = json.loads(self.state.read_text())
     self.assertEqual(state["release"]["target_commitish"], self.revision)
     self.assertEqual([asset["name"] for asset in state["release"]["assets"]], ["img.tar.gz", "img.tar.gz.sha256"])
-    export = next(call for call in self.calls if call["tool"] == "skopeo")
-    self.assertIn("--src-cert-dir", export["args"])
-    self.assertIn("--src-tls-verify=true", export["args"])
+    downloads = [call for call in self.calls if call["tool"] == "curl" and "/v2/" in call["args"][-1]]
+    self.assertTrue(downloads)
+    self.assertTrue(any("/manifests/" + self.index in call["args"][-1] for call in downloads))
     for call in self.calls:
       if call["tool"] == "curl":
         self.assertEqual(call["args"][call["args"].index("--cacert") + 1], str(ca))
-        self.assertIn(TOKEN, call["stdin"])
+        if "/v2/" not in call["args"][-1]:
+          self.assertIn(TOKEN, call["stdin"])
 
   def test_complete_release_rerun_verifies_downloads_without_build_export_or_upload(self):
     result = self.invoke()
@@ -550,9 +589,43 @@ class ReleaseScriptTests(unittest.TestCase):
     result = self.invoke(resume=True)
     self.assertEqual(result.returncode, 0, result.stderr)
     self.assertFalse(self.builds())
-    self.assertFalse(any(call["tool"] == "skopeo" for call in self.calls))
+    self.assertFalse(any(call["tool"] == "curl" and "/v2/" in call["args"][-1] for call in self.calls))
     self.assertFalse(any("--form" in call["args"] for call in self.calls))
     self.assertEqual(sum("/attachments/" in call["args"][-1] for call in self.calls), 2)
+
+  def test_registry_basic_authentication_exports_without_token_lookup_or_skopeo(self):
+    self.assertFalse((self.bin / "skopeo").exists())
+    result = self.invoke({"registry_basic": True})
+    self.assertEqual(result.returncode, 0, result.stderr)
+    downloads = [call for call in self.calls if call["tool"] == "curl" and "/v2/" in call["args"][-1]]
+    self.assertTrue(downloads)
+    self.assertFalse(any("/v2/token" in call["args"][-1] for call in downloads))
+    self.assertTrue(all("Authorization: Basic " in call["stdin"] for call in downloads))
+
+  def test_registry_token_endpoint_with_explicit_default_https_port_is_accepted(self):
+    result = self.invoke({"token_default_port": True})
+    self.assertEqual(result.returncode, 0, result.stderr)
+
+  def test_bearer_auth_and_external_blob_redirect_do_not_forward_credentials(self):
+    result = self.invoke({"external_redirect": True})
+    self.assertEqual(result.returncode, 0, result.stderr)
+    tokens = [call for call in self.calls if call["tool"] == "curl" and "/v2/token" in call["args"][-1]]
+    self.assertEqual(len(tokens), 1)
+    self.assertIn("Authorization: Basic ", tokens[0]["stdin"])
+    self.assertTrue(any("Authorization: Bearer registry-bearer-sensitive" in call["stdin"] for call in self.calls))
+    external = [call for call in self.calls if call["args"][-1].startswith("https://storage.invalid/")]
+    self.assertEqual(len(external), 1)
+    self.assertEqual(external[0]["stdin"], "")
+    self.assertEqual(external[0]["args"][0], "--disable")
+
+  def test_registry_authentication_and_redirect_errors_prevent_attachment_upload(self):
+    for flag in ("token_denied", "untrusted_realm", "blob_denied", "http_redirect", "redirect_loop", "registry_command_error"):
+      with self.subTest(flag=flag):
+        result = self.invoke({flag: True})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("Published", result.stdout)
+        self.assertFalse(any("--form" in call["args"] for call in self.calls))
+        self.assertFalse(any(call["args"][-1].startswith(("http://", "https://untrusted.invalid/")) for call in self.calls))
 
   def test_checksum_upload_failure_is_resumed_without_replacing_archive(self):
     result = self.invoke({"upload_failure": "img.tar.gz.sha256"})
@@ -574,9 +647,9 @@ class ReleaseScriptTests(unittest.TestCase):
         self.assertNotIn("Published", result.stdout)
         if scenario.get("api_denied") or scenario.get("remote_revision_conflict"):
           self.assertFalse(self.builds())
-    (self.bin / "skopeo").unlink()
+    (self.bin / "curl").unlink()
     result = self.invoke()
-    self.assertIn("Required command is not installed: skopeo", result.stderr)
+    self.assertIn("Required command is not installed: curl", result.stderr)
     self.assertFalse(self.builds())
 
   def test_rerun_rejects_tampered_checksum_and_untrusted_attachment_host(self):
@@ -609,7 +682,7 @@ class ReleaseScriptTests(unittest.TestCase):
             output.addfile(member, io.BytesIO(content))
         result = self.invoke()
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("missing a referenced blob" if not corrupt else "corrupted blob", result.stderr)
+        self.assertIn("download failed with HTTP 404" if not corrupt else "does not match its immutable digest", result.stderr)
         self.assertFalse(any("--form" in call["args"] for call in self.calls))
 
   def test_invalid_api_and_ca_settings_fail_before_build(self):
