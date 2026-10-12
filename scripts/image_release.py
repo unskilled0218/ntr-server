@@ -6,6 +6,8 @@ and subprocess boundaries so registry decisions never depend on shell pipelines.
 
 import json
 from datetime import datetime
+import gzip
+import hashlib
 import os
 from pathlib import Path
 import re
@@ -14,6 +16,8 @@ import signal
 import subprocess
 import sys
 import tempfile
+import tarfile
+from urllib.parse import urlsplit, quote
 
 
 PLATFORMS = ("linux/amd64", "linux/arm64")
@@ -102,7 +106,7 @@ class Commands:
 def configuration():
   token = os.environ.get("FORGEJO_TOKEN", "")
   if not token or any(ord(c) < 32 or ord(c) == 127 for c in token):
-    raise ReleaseError("Set FORGEJO_TOKEN to a nonempty Forgejo package-write token")
+    raise ReleaseError("Set FORGEJO_TOKEN to a nonempty Forgejo package/repository-write token")
   registry = os.environ.get("FORGEJO_REGISTRY", "git.lan")
   if not re.fullmatch(r"[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?(?::[0-9]+)?", registry):
     raise ReleaseError("FORGEJO_REGISTRY must be a lowercase host[:port], without a URL scheme")
@@ -148,7 +152,7 @@ def login_name(commands):
   return username
 
 
-def builder_info(commands, name, bootstrap=False):
+def builder_info(commands, name, bootstrap=False, create=False):
   if bootstrap:
     commands.run("docker", "buildx", "inspect", name, "--bootstrap", announce=True)
   # `inspect` has no --format; explicitly include Current because older Buildx
@@ -158,6 +162,16 @@ def builder_info(commands, name, bootstrap=False):
   matches = [item for item in builders if isinstance(item.get("Builder"), dict) and item["Builder"].get("Name") == name]
   # A node may share its builder's name, producing the same wrapper twice.
   matches = list({json.dumps(item, sort_keys=True): item for item in matches}.values())
+  if not matches and create:
+    config = Path(os.environ.get("BUILDKIT_CONFIG", "~/.config/buildkit/buildkitd.toml")).expanduser().resolve()
+    if "BUILDKIT_CONFIG" in os.environ and not config.is_file():
+      raise ReleaseError(f"BuildKit configuration does not exist: {config}")
+    args = ["docker", "buildx", "create", "--name", name, "--driver", "docker-container"]
+    if config.is_file():
+      args.extend(["--buildkitd-config", str(config)])
+    commands.log(f"Creating builder {name}" + (f" using {config}" if config.is_file() else " with default configuration"))
+    commands.run(*args, announce=True)
+    return builder_info(commands, name)
   if len(matches) != 1:
     raise ReleaseError(f"Could not identify builder {name}; create it with docker buildx create --name {name} --driver docker-container")
   info = matches[0].get("Builder")
@@ -185,7 +199,7 @@ def isolate_docker(commands, work):
   commands.log(f"Checking Docker engine and builder {RELEASE_BUILDER}")
   commands.run("docker", "buildx", "version")
   commands.run("docker", "info")
-  selected = builder_info(commands, RELEASE_BUILDER)
+  selected = builder_info(commands, RELEASE_BUILDER, create=True)
   name = selected["Name"]
   context = commands.run("docker", "context", "show").stdout.strip()
   contexts = {context}
@@ -216,6 +230,9 @@ def isolate_docker(commands, work):
     "cliPluginsExtraDirs": [str(original / "cli-plugins"), *plugin_dirs],
     "currentContext": "default",
     "proxies": proxies,
+    # A nonempty auth map prevents Docker from autodetecting a persistent native
+    # credential helper. The placeholder contains no credentials.
+    "auths": {"unused.invalid": {}},
   }
   isolated_config = isolated / "config.json"
   isolated_config.write_text(json.dumps(new_config))
@@ -351,9 +368,214 @@ def report(reference, verified, version, revision, reused=False):
   print(f"Version: {version}\nRevision: {revision}")
 
 
+def file_sha256(path):
+  digest = hashlib.sha256()
+  with path.open("rb") as source:
+    for chunk in iter(lambda: source.read(1024 * 1024), b""):
+      digest.update(chunk)
+  return digest.hexdigest()
+
+
+def verify_archive(path, digest, platforms):
+  # Inspect rather than extract untrusted archive paths. Verify every blob and
+  # require the exact published index plus its complete descriptor graph.
+  blobs = set()
+  manifests = {}
+  with tarfile.open(path, "r|gz") as archive:
+    index = None
+    for member in archive:
+      if not member.isfile():
+        continue
+      name = member.name.removeprefix("./")
+      if name == "index.json":
+        index = object_json(archive.extractfile(member).read(), "OCI archive index")
+      elif re.fullmatch(r"blobs/sha256/[0-9a-f]{64}", name):
+        source = archive.extractfile(member)
+        actual = hashlib.sha256()
+        content = bytearray() if member.size <= 4 * 1024 * 1024 else None
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+          actual.update(chunk)
+          if content is not None:
+            content.extend(chunk)
+        expected = "sha256:" + name.rsplit("/", 1)[1]
+        if actual.hexdigest() != expected.split(":", 1)[1]:
+          raise ReleaseError("OCI archive contains a corrupted blob")
+        blobs.add(expected)
+        if content is not None:
+          try:
+            value = json.loads(content)
+            if isinstance(value, dict) and ("manifests" in value or "config" in value and "layers" in value):
+              manifests[expected] = value
+          except (ValueError, UnicodeError):
+            pass
+  entries = index.get("manifests", []) if isinstance(index, dict) else []
+  if not isinstance(entries, list) or not any(isinstance(item, dict) and item.get("digest") == digest for item in entries):
+    raise ReleaseError("OCI archive does not reference the published index digest")
+  required = [digest]
+  visited = set()
+  while required:
+    current = required.pop()
+    if current in visited:
+      continue
+    visited.add(current)
+    if current not in blobs:
+      raise ReleaseError("OCI archive is missing a referenced blob")
+    manifest = manifests.get(current)
+    if manifest:
+      if "manifests" in manifest:
+        children = manifest["manifests"]
+      else:
+        layers = manifest.get("layers")
+        if not isinstance(layers, list):
+          raise ReleaseError("OCI archive contains invalid image layers")
+        children = [manifest.get("config"), *layers]
+      if not isinstance(children, list) or not all(isinstance(item, dict) for item in children):
+        raise ReleaseError("OCI archive contains invalid manifest descriptors")
+      required.extend(valid_digest(item.get("digest")) for item in children)
+  if digest not in manifests or not set(platforms.values()).issubset(manifests):
+    raise ReleaseError("OCI archive is missing required platform manifests")
+
+
+class Forgejo:
+  def __init__(self, commands, host, work):
+    self.commands = commands
+    self.work = work
+    self.api = os.environ.get("FORGEJO_API_URL", f"https://{host}/api/v1/repos/ntr/ntr-server").rstrip("/")
+    parsed = urlsplit(self.api)
+    if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
+      raise ReleaseError("FORGEJO_API_URL must be an HTTPS repository API URL without credentials or query")
+    self.ca = os.environ.get("FORGEJO_CA_FILE", "")
+    if self.ca:
+      self.ca = str(Path(self.ca).expanduser().resolve())
+      if not Path(self.ca).is_file():
+        raise ReleaseError(f"Forgejo CA certificate does not exist: {self.ca}")
+
+  def fetch(self, url, output, *args):
+    parsed = urlsplit(url)
+    if parsed.scheme != "https" or parsed.netloc != urlsplit(self.api).netloc or parsed.username or parsed.password:
+      raise ReleaseError("Forgejo download URL must use the configured HTTPS API host")
+    escaped = self.commands.token.replace("\\", "\\\\").replace('"', '\\"')
+    result = self.commands.run(
+      "curl", "--silent", "--show-error", "--proto", "=https",
+      "--connect-timeout", "15", "--max-time", "1800", "--config", "-",
+      *(["--cacert", self.ca] if self.ca else []),
+      "--output", str(output), "--write-out", "%{http_code}", *args, url,
+      data=f'header = "Authorization: token {escaped}"\n',
+    )
+    return result.stdout.strip()
+
+  def request(self, path, payload=None, attachment=None, missing=False):
+    args = []
+    if payload is not None:
+      data = self.work / "request.json"
+      data.write_text(json.dumps(payload))
+      args = ["--request", "POST", "--header", "Content-Type: application/json", "--data-binary", f"@{data}"]
+    elif attachment is not None:
+      args = ["--form", f'attachment=@"{attachment}"']
+    output = self.work / "response.json"
+    status = self.fetch(self.api + path, output, *args)
+    if missing and status == "404":
+      return None
+    if status != ("201" if payload is not None or attachment is not None else "200"):
+      raise ReleaseError(f"Forgejo request {path} failed with HTTP {status}")
+    return object_json(output.read_text(), "Forgejo response")
+
+  def ensure_release(self, version, revision, image, digest):
+    tag = f"v{version}"
+    identity = f"Image: `{image}@{digest}`\nRevision: `{revision}`"
+    self.commands.log(f"Looking up Forgejo release {tag}")
+    release = self.request(f"/releases/tags/{quote(tag, safe='')}", missing=True)
+    if release is None:
+      commit = self.request(f"/git/commits/{quote('refs/tags/' + tag, safe='')}", missing=True)
+      if commit is not None and commit.get("sha") != revision:
+        raise ReleaseError("Existing Forgejo Git tag conflicts with this revision")
+      release = self.request("/releases", {
+        "tag_name": tag, "target_commitish": revision, "name": tag,
+        "body": identity, "draft": False, "prerelease": "-" in version,
+      })
+    if release.get("tag_name") != tag or release.get("body") != identity or type(release.get("id")) is not int or release["id"] <= 0 or release.get("draft") is True:
+      raise ReleaseError("Existing Forgejo release identity conflicts with this image/revision")
+    if self.request(f"/git/commits/{quote('refs/tags/' + tag, safe='')}").get("sha") != revision:
+      raise ReleaseError("Forgejo release tag does not identify the expected revision")
+    return release
+
+
+def release_artifacts(commands, forgejo, work, image, version, revision, verified):
+  digest, platforms = verified
+  release = forgejo.ensure_release(version, revision, image, digest)
+  assets = release.get("assets", [])
+  if not isinstance(assets, list):
+    raise ReleaseError("Invalid Forgejo release assets")
+  wanted = ("img.tar.gz", "img.tar.gz.sha256")
+  existing = {}
+  for asset in assets:
+    if isinstance(asset, dict) and asset.get("name") in wanted:
+      if asset["name"] in existing:
+        raise ReleaseError("Duplicate Forgejo image release attachments")
+      existing[asset["name"]] = asset
+  archive = work / wanted[0]
+  checksum = work / wanted[1]
+  destination = commands.root / "release" / version
+  local = destination / archive.name
+  if archive.name in existing:
+    commands.log("Downloading existing release archive for integrity verification")
+    if forgejo.fetch(existing[archive.name].get("browser_download_url", ""), archive) != "200":
+      raise ReleaseError("Could not download existing image archive")
+  elif checksum.name in existing:
+    raise ReleaseError("Release has a checksum without its archive; resolve the incomplete release before retrying")
+  elif local.is_file():
+    commands.log(f"Reusing local archive {local}")
+    shutil.copyfile(local, archive)
+  else:
+    commands.log(f"Exporting both architectures from {image}@{digest}")
+    raw = work / "img.tar"
+    cert_args = []
+    if forgejo.ca:
+      certificates = work / "registry-certs"
+      certificates.mkdir()
+      shutil.copyfile(forgejo.ca, certificates / "ca.crt")
+      cert_args = ["--src-cert-dir", str(certificates)]
+    commands.run(
+      "skopeo", "copy", "--all", "--preserve-digests", "--src-authfile",
+      str(Path(commands.env["DOCKER_CONFIG"]) / "config.json"), "--src-tls-verify=true", *cert_args,
+      f"docker://{image}@{digest}", f"oci-archive:{raw}", announce=True,
+    )
+    commands.log("Compressing OCI archive as img.tar.gz")
+    with raw.open("rb") as source, archive.open("wb") as output:
+      with gzip.GzipFile(filename="", mode="wb", fileobj=output, mtime=0) as compressed:
+        shutil.copyfileobj(source, compressed)
+  commands.log("Verifying OCI archive blobs and generating SHA-256 checksum")
+  verify_archive(archive, digest, platforms)
+  expected_checksum = f"{file_sha256(archive)}  {archive.name}\n"
+  if checksum.name in existing:
+    if forgejo.fetch(existing[checksum.name].get("browser_download_url", ""), checksum) != "200" or checksum.read_text() != expected_checksum:
+      raise ReleaseError("Existing release checksum does not match its image archive")
+  checksum.write_text(expected_checksum)
+  destination.mkdir(parents=True, exist_ok=True)
+  for path in (archive, checksum):
+    # Copy on the destination filesystem so replacement is atomic across /tmp mounts.
+    with tempfile.NamedTemporaryFile(dir=destination, delete=False) as output:
+      staged = Path(output.name)
+      try:
+        with path.open("rb") as source:
+          shutil.copyfileobj(source, output)
+        output.close()
+        staged.replace(destination / path.name)
+      finally:
+        staged.unlink(missing_ok=True)
+    if path.name not in existing:
+      commands.log(f"Uploading Forgejo attachment {path.name}")
+      asset = forgejo.request(f"/releases/{release['id']}/assets?name={quote(path.name)}", attachment=path)
+      if asset.get("name") != path.name:
+        raise ReleaseError("Forgejo returned a different attachment name")
+    else:
+      commands.log(f"Verified existing attachment {path.name}")
+  print(f"Artifacts: {destination}")
+
+
 def release(root):
   token, host, image = configuration()
-  for command in ("git", "cargo", "docker"):
+  for command in ("git", "cargo", "docker", "curl", "skopeo"):
     if not shutil.which(command):
       raise ReleaseError(f"Required command is not installed: {command}")
   commands = Commands(root, token)
@@ -363,6 +585,10 @@ def release(root):
   commands.log(f"Release target {reference}; revision {revision}")
   with tempfile.TemporaryDirectory(prefix="ntr-image-release-") as directory:
     work = Path(directory)
+    forgejo = Forgejo(commands, host, work)
+    commands.log("Checking Forgejo repository access and committed source revision")
+    if forgejo.request(f"/git/commits/{revision}").get("sha") != revision:
+      raise ReleaseError("Forgejo repository does not contain the expected revision; push server main before releasing")
     builder = isolate_docker(commands, work)
     username = login_name(commands)
     commands.log(f"Logging in to {host} as {username}")
@@ -373,6 +599,7 @@ def release(root):
     if existing:
       if registry.resolve(reference) != existing[0]:
         raise ReleaseError("The version tag moved while inspecting the existing release")
+      release_artifacts(commands, forgejo, work, image, version, revision, existing)
       report(reference, existing, version, revision, reused=True)
       commands.log("Existing release verified; removing temporary credentials")
       return
@@ -397,18 +624,19 @@ def release(root):
     published = registry.inspect(f"{image}@{expected}")
     if registry.resolve(reference) != expected:
       raise ReleaseError("The version tag does not match the built index digest")
+    release_artifacts(commands, forgejo, work, image, version, revision, published)
     report(reference, published, version, revision)
     commands.log("Release verified; removing temporary credentials")
 
 
 def main():
   if len(sys.argv) > 1:
-    print("Usage: scripts/release.sh\nPublish linux/amd64 and linux/arm64 using FORGEJO_TOKEN.")
+    print("Usage: scripts/release.sh\nPublish linux/amd64 and linux/arm64 plus Forgejo image archive attachments using FORGEJO_TOKEN.")
     return 0 if sys.argv[1:] == ["--help"] else 2
   try:
     release(Path(__file__).resolve().parent.parent)
     return 0
-  except (ReleaseError, OSError, ValueError) as error:
+  except (ReleaseError, OSError, ValueError, EOFError, tarfile.TarError) as error:
     token = os.environ.get("FORGEJO_TOKEN", "")
     message = str(error)
     if token:

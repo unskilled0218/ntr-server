@@ -8,3 +8,6 @@
 
 # Standard-library release verification bytecode.
 __pycache__/
+
+# Generated image release archives and checksums.
+/release/
