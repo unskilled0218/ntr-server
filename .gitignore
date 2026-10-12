@@ -5,3 +5,6 @@
 # Docker Compose runtime data (todo.txt + Note.md), but keep the bind-mount dir present.
 /data/*
 !/data/.gitkeep
+
+# Standard-library release verification bytecode.
+__pycache__/
