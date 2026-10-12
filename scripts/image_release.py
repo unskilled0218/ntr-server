@@ -5,7 +5,9 @@ and subprocess boundaries so registry decisions never depend on shell pipelines.
 """
 
 import json
+import base64
 from datetime import datetime
+from email.parser import Parser
 import gzip
 import hashlib
 import os
@@ -17,7 +19,8 @@ import subprocess
 import sys
 import tempfile
 import tarfile
-from urllib.parse import urlsplit, quote
+from urllib.parse import urlsplit, urlunsplit, urljoin, urlencode, parse_qsl, quote
+from urllib.request import parse_http_list, parse_keqv_list
 
 
 PLATFORMS = ("linux/amd64", "linux/arm64")
@@ -58,6 +61,7 @@ class Commands:
   def __init__(self, root, token):
     self.root = root
     self.token = token
+    self.secrets = {token}
     self.env = dict(os.environ)
     self.env.pop("FORGEJO_TOKEN", None)
 
@@ -74,14 +78,20 @@ class Commands:
       if announce:
         for output in (result.stdout, result.stderr):
           if output:
-            print(output.replace(self.token, "[redacted]"), end="", file=sys.stderr, flush=True)
+            print(self.redact(output), end="", file=sys.stderr, flush=True)
     if check and result.returncode:
-      detail = (result.stderr or result.stdout).strip().replace(self.token, "[redacted]")
+      detail = self.redact((result.stderr or result.stdout).strip())
       raise ReleaseError(f"{args[0]} {args[1] if len(args) > 1 else ''} failed: {detail}")
     return result
 
   def log(self, message):
-    print(f"[release {datetime.now():%H:%M:%S}] {message}".replace(self.token, "[redacted]"), file=sys.stderr, flush=True)
+    print(self.redact(f"[release {datetime.now():%H:%M:%S}] {message}"), file=sys.stderr, flush=True)
+
+  def redact(self, message):
+    for secret in sorted(self.secrets, key=len, reverse=True):
+      if secret:
+        message = message.replace(secret, "[redacted]")
+    return message
 
   def stream(self, args):
     # Merge pipes so neither stream can block the child while the other is read.
@@ -93,7 +103,7 @@ class Commands:
       output = []
       try:
         for line in process.stdout:
-          redacted = line.replace(self.token, "[redacted]")
+          redacted = self.redact(line)
           print(redacted, end="", file=sys.stderr, flush=True)
           output.append(redacted)
         return subprocess.CompletedProcess(args, process.wait(), "".join(output), "")
@@ -500,6 +510,144 @@ class Forgejo:
     return release
 
 
+class RegistryArchive:
+  """Copy an immutable registry descriptor graph into an OCI image layout."""
+
+  def __init__(self, commands, image, username, ca, work):
+    self.commands = commands
+    host, self.repository = image.split("/", 1)
+    self.origin = f"https://{host}"
+    self.work = work
+    self.ca = ca
+    credentials = base64.b64encode(f"{username}:{commands.token}".encode()).decode()
+    commands.secrets.add(credentials)
+    self.basic = f"Basic {credentials}"
+    self.authorization = self.basic
+
+  def same_host(self, url):
+    parsed = urlsplit(url)
+    origin = urlsplit(self.origin)
+    return parsed.scheme == "https" and (parsed.hostname, parsed.port or 443) == (origin.hostname, origin.port or 443)
+
+  def request(self, url, output, authorization=""):
+    header_file = self.work / "registry-headers.txt"
+    escaped = authorization.replace("\\", "\\\\").replace('"', '\\"')
+    result = self.commands.run(
+      "curl", "--disable", "--silent", "--show-error", "--proto", "=https",
+      "--connect-timeout", "15", "--max-time", "1800", "--config", "-",
+      *(["--cacert", self.ca] if self.ca and self.same_host(url) else []),
+      *(["--header", "Accept: " + ", ".join(sorted(INDEX_TYPES | IMAGE_TYPES))] if "/manifests/" in urlsplit(url).path else []),
+      "--dump-header", str(header_file), "--output", str(output), "--write-out", "%{http_code}", url,
+      data=f'header = "Authorization: {escaped}"\n' if authorization else "",
+    )
+    blocks = [block for block in header_file.read_text(encoding="iso-8859-1").replace("\r\n", "\n").split("\n\n") if block.strip()]
+    headers = Parser().parsestr(blocks[-1].partition("\n")[2]) if blocks else Parser().parsestr("")
+    return result.stdout.strip(), headers
+
+  def authenticate(self, headers):
+    self.commands.log("Authenticating registry archive download")
+    challenges = headers.get_all("WWW-Authenticate", [])
+    challenge = next((value for value in challenges if value.lower().startswith("bearer ")), "")
+    values = parse_keqv_list(parse_http_list(challenge[7:]))
+    realm = urlsplit(values.get("realm", ""))
+    if not self.same_host(realm.geturl()) or realm.username or realm.password or realm.fragment:
+      raise ReleaseError("Registry Bearer token endpoint must use the registry's HTTPS host")
+    query = [(key, value) for key, value in parse_qsl(realm.query) if key not in ("scope", "service")]
+    query.append(("scope", f"repository:{self.repository}:pull"))
+    if values.get("service"):
+      query.append(("service", values["service"]))
+    url = urlunsplit(realm._replace(query=urlencode(query)))
+    output = self.work / "registry-token.json"
+    status, _ = self.request(url, output, self.basic)
+    if status != "200":
+      raise ReleaseError(f"Registry token lookup failed with HTTP {status}")
+    response = object_json(output.read_text(), "registry authentication")
+    token = response.get("token") or response.get("access_token")
+    if not isinstance(token, str) or not token or any(ord(char) < 32 or ord(char) == 127 for char in token):
+      raise ReleaseError("Registry returned an invalid Bearer token")
+    self.commands.secrets.add(token)
+    self.authorization = f"Bearer {token}"
+
+  def download(self, digest, kind, output):
+    url = f"{self.origin}/v2/{self.repository}/{kind}/{valid_digest(digest)}"
+    refreshed = False
+    for _ in range(8):
+      parsed = urlsplit(url)
+      if parsed.scheme != "https" or parsed.username or parsed.password or parsed.fragment:
+        raise ReleaseError("Registry redirect must use HTTPS without embedded credentials")
+      same_host = self.same_host(url)
+      status, headers = self.request(url, output, self.authorization if same_host else "")
+      if status == "401" and same_host and not refreshed:
+        self.authenticate(headers)
+        refreshed = True
+        continue
+      if status in ("301", "302", "303", "307", "308"):
+        location = headers.get("Location")
+        if not location:
+          raise ReleaseError("Registry redirect has no Location header")
+        url = urljoin(url, location)
+        continue
+      if status != "200":
+        raise ReleaseError(f"Registry {kind} download failed with HTTP {status}")
+      if file_sha256(output) != digest.split(":", 1)[1]:
+        raise ReleaseError("Registry download does not match its immutable digest")
+      return
+    raise ReleaseError("Registry download exceeded its authentication/redirect limit")
+
+  def export(self, digest, archive, image, version):
+    layout = self.work / "oci"
+    blobs = layout / "blobs/sha256"
+    blobs.mkdir(parents=True)
+    required = [(valid_digest(digest), "manifests")]
+    visited = set()
+    root = None
+    while required:
+      current, kind = required.pop()
+      if current in visited:
+        continue
+      visited.add(current)
+      output = blobs / current.split(":", 1)[1]
+      self.commands.log(f"Downloading registry {kind} {current}")
+      self.download(current, kind, output)
+      if kind != "manifests":
+        continue
+      manifest = object_json(output.read_text(), "registry archive manifest")
+      if current == digest:
+        root = manifest
+      if "manifests" in manifest:
+        children = manifest["manifests"]
+        child_kind = "manifests"
+      else:
+        layers = manifest.get("layers")
+        if layers is None:
+          layers = []
+        if not isinstance(layers, list):
+          raise ReleaseError("Registry manifest contains invalid layers")
+        children = [manifest.get("config"), *layers]
+        child_kind = "blobs"
+      if not isinstance(children, list) or not all(isinstance(item, dict) for item in children):
+        raise ReleaseError("Registry manifest contains invalid descriptors")
+      required.extend((valid_digest(item.get("digest")), child_kind) for item in children)
+    if not isinstance(root, dict) or root.get("mediaType") not in INDEX_TYPES:
+      raise ReleaseError("Expected a multi-platform registry index for archive export")
+    index = {"schemaVersion": 2, "manifests": [{
+      "mediaType": root["mediaType"], "digest": digest,
+      "size": (blobs / digest.split(":", 1)[1]).stat().st_size,
+      "annotations": {"org.opencontainers.image.ref.name": f"{image}:{version}", "io.containerd.image.name": f"{image}:{version}"},
+    }]}
+    (layout / "index.json").write_text(json.dumps(index))
+    (layout / "oci-layout").write_text('{"imageLayoutVersion":"1.0.0"}')
+    self.commands.log("Writing compressed OCI archive img.tar.gz")
+    with archive.open("wb") as output, gzip.GzipFile(filename="", mode="wb", fileobj=output, mtime=0) as compressed:
+      with tarfile.open(fileobj=compressed, mode="w|") as tar:
+        for path in sorted(layout.rglob("*")):
+          if path.is_file():
+            member = tarfile.TarInfo(path.relative_to(layout).as_posix())
+            member.size = path.stat().st_size
+            with path.open("rb") as source:
+              tar.addfile(member, source)
+
+
 def release_artifacts(commands, forgejo, work, image, version, revision, verified):
   digest, platforms = verified
   release = forgejo.ensure_release(version, revision, image, digest)
@@ -528,22 +676,7 @@ def release_artifacts(commands, forgejo, work, image, version, revision, verifie
     shutil.copyfile(local, archive)
   else:
     commands.log(f"Exporting both architectures from {image}@{digest}")
-    raw = work / "img.tar"
-    cert_args = []
-    if forgejo.ca:
-      certificates = work / "registry-certs"
-      certificates.mkdir()
-      shutil.copyfile(forgejo.ca, certificates / "ca.crt")
-      cert_args = ["--src-cert-dir", str(certificates)]
-    commands.run(
-      "skopeo", "copy", "--all", "--preserve-digests", "--src-authfile",
-      str(Path(commands.env["DOCKER_CONFIG"]) / "config.json"), "--src-tls-verify=true", *cert_args,
-      f"docker://{image}@{digest}", f"oci-archive:{raw}", announce=True,
-    )
-    commands.log("Compressing OCI archive as img.tar.gz")
-    with raw.open("rb") as source, archive.open("wb") as output:
-      with gzip.GzipFile(filename="", mode="wb", fileobj=output, mtime=0) as compressed:
-        shutil.copyfileobj(source, compressed)
+    RegistryArchive(commands, image, login_name(commands), forgejo.ca, work).export(digest, archive, image, version)
   commands.log("Verifying OCI archive blobs and generating SHA-256 checksum")
   verify_archive(archive, digest, platforms)
   expected_checksum = f"{file_sha256(archive)}  {archive.name}\n"
@@ -575,7 +708,7 @@ def release_artifacts(commands, forgejo, work, image, version, revision, verifie
 
 def release(root):
   token, host, image = configuration()
-  for command in ("git", "cargo", "docker", "curl", "skopeo"):
+  for command in ("git", "cargo", "docker", "curl"):
     if not shutil.which(command):
       raise ReleaseError(f"Required command is not installed: {command}")
   commands = Commands(root, token)
