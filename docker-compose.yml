@@ -1,20 +1,11 @@
 # Pull the amd64/arm64 Forgejo image; no Rust toolchain or source mount is needed.
-# See docs/docker-compose.md for registry login, image overrides, and data permissions.
+# See docs/docker-compose.md for registry login, deployment, and data permissions.
 services:
   ntr-server:
-    image: ${NTR_IMAGE:-git.lan/ntr/ntr-server:0.2.3}
-    user: "${NTR_UID:-1000}:${NTR_GID:-1000}"
-    environment:
-      # The app defaults to 127.0.0.1, which a published port cannot reach; bind all
-      # interfaces inside the container instead.
-      HOST: 0.0.0.0
-      PORT: 8080
-      TODO_FILE: /data/todo.txt
-      NOTE_FILE: /data/Note.md
-      LABELS_FILE: /data/labels.json
-      TODO_ADD_CREATION_DATE: "${TODO_ADD_CREATION_DATE:-true}"
+    image: git.lan/ntr/ntr-server:0.2.4
+    user: "1000:1000"
     ports:
-      - "${NTR_BIND:-127.0.0.1}:${NTR_PORT:-8080}:8080"
+      - "127.0.0.1:8080:8080"
     volumes:
       - ./data:/data
     healthcheck:
