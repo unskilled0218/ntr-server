@@ -1,0 +1,3 @@
+# Live updates
+
+`GET /api/events` is a Server-Sent Events stream for clients that want to stay in sync without polling. Each time a resource changes it emits one `change` event whose payload is `tasks` or `note`; a subscriber reacts by re-fetching that resource through the normal GET endpoints. Changes are announced whether they come from the API itself (any mutation) or from an out-of-band edit to `todo.txt` / `Note.md` by another program — the server watches the files and broadcasts the difference. A subscriber that falls behind the buffer skips the missed events and re-syncs on its next event or on reconnect. The stream carries no auth and no payload beyond the resource name, matching the rest of the API.
