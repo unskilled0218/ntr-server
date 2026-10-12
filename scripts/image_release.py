@@ -5,6 +5,7 @@ and subprocess boundaries so registry decisions never depend on shell pipelines.
 """
 
 import json
+from datetime import datetime
 import os
 from pathlib import Path
 import re
@@ -58,19 +59,44 @@ class Commands:
 
   def run(self, *args, data=None, check=True, announce=False):
     if announce:
-      print("Running " + " ".join(args), flush=True)
-    result = subprocess.run(
-      args, cwd=self.root, env=self.env, input=data,
-      text=True, capture_output=True,
-    )
+      self.log("Running " + " ".join(args))
+    if announce and data is None:
+      result = self.stream(args)
+    else:
+      result = subprocess.run(
+        args, cwd=self.root, env=self.env, input=data,
+        text=True, capture_output=True,
+      )
+      if announce:
+        for output in (result.stdout, result.stderr):
+          if output:
+            print(output.replace(self.token, "[redacted]"), end="", file=sys.stderr, flush=True)
     if check and result.returncode:
       detail = (result.stderr or result.stdout).strip().replace(self.token, "[redacted]")
       raise ReleaseError(f"{args[0]} {args[1] if len(args) > 1 else ''} failed: {detail}")
-    if announce and result.stdout:
-      print(result.stdout.replace(self.token, "[redacted]"), end="", flush=True)
-    if announce and result.stderr:
-      print(result.stderr.replace(self.token, "[redacted]"), end="", file=sys.stderr)
     return result
+
+  def log(self, message):
+    print(f"[release {datetime.now():%H:%M:%S}] {message}".replace(self.token, "[redacted]"), file=sys.stderr, flush=True)
+
+  def stream(self, args):
+    # Merge pipes so neither stream can block the child while the other is read.
+    # Redact complete lines, including tokens split across separate child writes.
+    with subprocess.Popen(
+      args, cwd=self.root, env=self.env, stdin=subprocess.DEVNULL,
+      stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
+    ) as process:
+      output = []
+      try:
+        for line in process.stdout:
+          redacted = line.replace(self.token, "[redacted]")
+          print(redacted, end="", file=sys.stderr, flush=True)
+          output.append(redacted)
+        return subprocess.CompletedProcess(args, process.wait(), "".join(output), "")
+      except BaseException:
+        process.kill()
+        process.wait()
+        raise
 
 
 def configuration():
@@ -124,7 +150,7 @@ def login_name(commands):
 
 def builder_info(commands, name, bootstrap=False):
   if bootstrap:
-    commands.run("docker", "buildx", "inspect", name, "--bootstrap")
+    commands.run("docker", "buildx", "inspect", name, "--bootstrap", announce=True)
   # `inspect` has no --format; explicitly include Current because older Buildx
   # versions omit it from the embedded Builder object's JSON representation.
   output = commands.run("docker", "buildx", "ls", "--format", BUILDER_FORMAT).stdout
@@ -156,6 +182,7 @@ def isolate_docker(commands, work):
     commands.env["DOCKER_CERT_PATH"] = str(Path(commands.env["DOCKER_CERT_PATH"]).resolve())
   config_file = original / "config.json"
   config = object_json(config_file.read_text(), "Docker configuration") if config_file.exists() else {}
+  commands.log(f"Checking Docker engine and builder {RELEASE_BUILDER}")
   commands.run("docker", "buildx", "version")
   commands.run("docker", "info")
   selected = builder_info(commands, RELEASE_BUILDER)
@@ -173,6 +200,7 @@ def isolate_docker(commands, work):
       contexts.add(endpoint)
   exports = []
   for index, item in enumerate(sorted(contexts - {"default"})):
+    commands.log(f"Preserving Docker context {item}")
     archive = work / f"context-{index}.dockercontext"
     commands.run("docker", "context", "export", item, str(archive))
     exports.append((item, archive))
@@ -204,6 +232,7 @@ def isolate_docker(commands, work):
     commands.env["DOCKER_CONTEXT"] = context_override
   commands.run("docker", "buildx", "version")
   commands.run("docker", "info")
+  commands.log(f"Bootstrapping and verifying isolated builder {name}")
   verified = builder_info(commands, name, bootstrap=True)
   if verified["Name"] != name:
     raise ReleaseError("Credential isolation changed the selected builder")
@@ -227,6 +256,7 @@ def isolate_docker(commands, work):
     available.add("linux/arm64")
   if not set(PLATFORMS).issubset(available):
     raise ReleaseError("The selected builder must support both linux/amd64 and linux/arm64")
+  commands.log(f"Builder {name} ready for {', '.join(PLATFORMS)}")
   return name
 
 
@@ -238,6 +268,7 @@ class Registry:
     self.revision = revision
 
   def manifest(self, reference, allow_missing=False):
+    self.commands.log(f"Inspecting registry manifest {reference}")
     result = self.commands.run(
       "docker", "buildx", "imagetools", "inspect", reference,
       "--format", "{{json .Manifest}}", check=False,
@@ -298,6 +329,7 @@ class Registry:
     return digest, platforms
 
   def validate_config(self, platform, child):
+    self.commands.log(f"Verifying {platform} configuration at {child}")
     config = object_json(self.commands.run(
       "docker", "buildx", "imagetools", "inspect", f"{self.image}@{child}",
       "--format", "{{json .Image}}",
@@ -325,28 +357,35 @@ def release(root):
     if not shutil.which(command):
       raise ReleaseError(f"Required command is not installed: {command}")
   commands = Commands(root, token)
+  commands.log("Checking clean server main checkout and Cargo version")
   version, revision = checkout_identity(commands)
   reference = f"{image}:{version}"
+  commands.log(f"Release target {reference}; revision {revision}")
   with tempfile.TemporaryDirectory(prefix="ntr-image-release-") as directory:
     work = Path(directory)
     builder = isolate_docker(commands, work)
     username = login_name(commands)
+    commands.log(f"Logging in to {host} as {username}")
     commands.run("docker", "login", host, "--username", username, "--password-stdin", data=token + "\n")
+    commands.log("Registry login succeeded; checking existing version tag")
     registry = Registry(commands, image, version, revision)
     existing = registry.inspect(reference, allow_missing=True)
     if existing:
       if registry.resolve(reference) != existing[0]:
         raise ReleaseError("The version tag moved while inspecting the existing release")
       report(reference, existing, version, revision, reused=True)
+      commands.log("Existing release verified; removing temporary credentials")
       return
+    commands.log("Version tag is absent; running locked Cargo tests")
     commands.run("cargo", "test", "--locked", announce=True)
     # Recheck after tests: a long-running test must not label changed source as the old revision.
     if checkout_identity(commands) != (version, revision):
       raise ReleaseError("The checkout changed before the image build")
+    commands.log(f"Tests passed; building and pushing {', '.join(PLATFORMS)}")
     metadata = work / "build.json"
     commands.run(
       "docker", "buildx", "build", "--builder", builder,
-      "--platform", ",".join(PLATFORMS), "--push", "--tag", reference,
+      "--platform", ",".join(PLATFORMS), "--progress", "plain", "--push", "--tag", reference,
       "--file", str(root / "Dockerfile"), "--metadata-file", str(metadata),
       "--build-arg", f"VERSION={version}", "--build-arg", f"REVISION={revision}",
       "--build-arg", "SOURCE=https://git.lan/ntr/ntr-server", str(root), announce=True,
@@ -354,10 +393,12 @@ def release(root):
     if not metadata.is_file():
       raise ReleaseError("Buildx did not produce build metadata; publication outcome must be inspected")
     expected = valid_digest(object_json(metadata.read_text(), "build metadata").get("containerimage.digest"))
+    commands.log(f"Build/push completed; verifying index {expected}")
     published = registry.inspect(f"{image}@{expected}")
     if registry.resolve(reference) != expected:
       raise ReleaseError("The version tag does not match the built index digest")
     report(reference, published, version, revision)
+    commands.log("Release verified; removing temporary credentials")
 
 
 def main():

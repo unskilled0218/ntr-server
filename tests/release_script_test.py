@@ -4,9 +4,11 @@ import json
 import os
 from pathlib import Path
 import shutil
+import selectors
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 
@@ -24,6 +26,7 @@ from pathlib import Path
 import signal
 import subprocess
 import sys
+import time
 
 tool = Path(sys.argv[0]).name
 args = sys.argv[1:]
@@ -122,6 +125,18 @@ if args[:1] == ["login"]:
   config_path.write_text(json.dumps(config))
   sys.exit(0)
 if args[:2] == ["buildx", "build"]:
+  if scenario.get("live_progress"):
+    print("fixture build stdout", flush=True)
+    sys.stderr.write("fixture-token-")
+    sys.stderr.flush()
+    sys.stderr.write("never-print\nfixture build waiting\n")
+    sys.stderr.flush()
+    gate = Path(os.environ["FIXTURE_BUILD_GATE"])
+    deadline = time.monotonic() + 10
+    while not gate.exists():
+      if time.monotonic() > deadline:
+        fail("build progress was not streamed before completion")
+      time.sleep(0.01)
   if scenario.get("terminate_build"):
     os.kill(os.getppid(), signal.SIGTERM)
     sys.exit(0)
@@ -273,6 +288,10 @@ class ReleaseScriptTests(unittest.TestCase):
         self.assertIn(AMD64, result.stdout)
         self.assertIn(ARM64, result.stdout)
         self.assertEqual(len(self.builds()), 1)
+        self.assertEqual(self.builds()[0]["args"][self.builds()[0]["args"].index("--progress") + 1], "plain")
+        self.assertIn("Registry login succeeded", result.stderr)
+        self.assertIn("Tests passed; building and pushing linux/amd64, linux/arm64", result.stderr)
+        self.assertIn("Release verified; removing temporary credentials", result.stderr)
         login = next(call for call in self.calls if call["args"][:1] == ["login"])
         self.assertEqual(login["stdin"], TOKEN + "\n")
         self.assertEqual(login["args"][login["args"].index("--username") + 1], "fixture-login")
@@ -303,6 +322,39 @@ class ReleaseScriptTests(unittest.TestCase):
     self.assertIn("Reused", result.stdout)
     self.assertFalse(self.builds())
     self.assertFalse(any(call["args"] == ["test", "--locked"] for call in self.calls))
+    self.assertIn("Existing release verified", result.stderr)
+
+  def test_build_progress_is_redacted_and_visible_before_build_completion(self):
+    gate = self.work / "finish-build"
+    self.state.write_text(json.dumps({"scenario": {"live_progress": True}}))
+    self.events.write_text("")
+    output = ""
+    with subprocess.Popen(
+      [str(self.bin / "bash"), str(self.root / "scripts/release.sh")],
+      cwd=self.root.parent, env=self.env | {"FIXTURE_BUILD_GATE": str(gate)},
+      stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+    ) as process:
+      try:
+        with selectors.DefaultSelector() as selector:
+          selector.register(process.stdout, selectors.EVENT_READ)
+          deadline = time.monotonic() + 8
+          while "fixture build waiting" not in output:
+            events = selector.select(max(0, deadline - time.monotonic()))
+            self.assertTrue(events, "No live build progress arrived before completion")
+            chunk = os.read(process.stdout.fileno(), 65536)
+            self.assertTrue(chunk, "Publisher exited before live build progress")
+            output += chunk.decode()
+        self.assertIsNone(process.poll(), "Build completed before progress was observed")
+        self.assertIn("fixture build stdout", output)
+        self.assertIn("[redacted]", output)
+        self.assertNotIn(TOKEN, output)
+      finally:
+        gate.write_text("continue")
+        remaining, _ = process.communicate(timeout=30)
+        output += remaining.decode()
+    self.assertEqual(process.returncode, 0, output)
+    self.assertIn("Published git.lan/ntr/ntr-server:0.2.2", output)
+    self.assertNotIn(TOKEN, output)
 
   def test_relative_docker_and_buildx_paths_use_the_callers_directory(self):
     result = self.invoke(env={
