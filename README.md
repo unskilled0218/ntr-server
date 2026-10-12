@@ -20,6 +20,7 @@ The server listens on `127.0.0.1:8080` by default and has no authentication. Kee
 
 - [Run and configuration](docs/configuration.md)
 - [Docker Compose](docs/docker-compose.md)
+- [Container image releases](docs/image-release.md)
 - [HTTP API](docs/api.md)
 - [Task IDs](docs/task-ids.md)
 - [todo.txt support](docs/todo-txt.md)

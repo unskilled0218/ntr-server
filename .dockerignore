@@ -1,0 +1,9 @@
+# Only the Rust build inputs enter the context. Data, credentials, Git metadata,
+# caches, scripts, tests, and documentation stay outside image layers.
+**
+!Dockerfile
+!.dockerignore
+!Cargo.toml
+!Cargo.lock
+!src/
+!src/**

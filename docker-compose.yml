@@ -1,15 +1,9 @@
-# Run my-ntr-server with no Dockerfile: the official Rust image builds and runs the crate
-# from the mounted source. todo.txt, Note.md, and labels.json live in ./data on the host so they persist
-# and can be edited outside the container (the server watches them and updates clients live).
-# First `up` compiles the dependency tree (a few minutes); the cargo caches below make every
-# later start fast. Override the port with NTR_PORT, e.g. `NTR_PORT=9000 docker compose up`.
-# The server is published on 127.0.0.1 only by default (it is unauthenticated, like the app's
-# own loopback default); set NTR_BIND=0.0.0.0 to reach it from other devices on your network.
+# Pull the amd64/arm64 Forgejo image; no Rust toolchain or source mount is needed.
+# See docs/docker-compose.md for registry login, image overrides, and data permissions.
 services:
   ntr-server:
-    image: rust:1-bookworm
-    working_dir: /usr/src/app
-    command: cargo run --release
+    image: ${NTR_IMAGE:-git.lan/ntr/ntr-server:0.2.2}
+    user: "${NTR_UID:-1000}:${NTR_GID:-1000}"
     environment:
       # The app defaults to 127.0.0.1, which a published port cannot reach; bind all
       # interfaces inside the container instead.
@@ -18,23 +12,15 @@ services:
       TODO_FILE: /data/todo.txt
       NOTE_FILE: /data/Note.md
       LABELS_FILE: /data/labels.json
-      TODO_ADD_CREATION_DATE: "true"
+      TODO_ADD_CREATION_DATE: "${TODO_ADD_CREATION_DATE:-true}"
     ports:
-      - "0.0.0.0:8080:8080"
+      - "${NTR_BIND:-127.0.0.1}:${NTR_PORT:-8080}:8080"
     volumes:
-      - ./:/usr/src/app                                # source, so cargo can build (no Dockerfile)
-      - ./data:/data                                   # app data files, editable from the host
-      - ntr-cargo-target:/usr/src/app/target          # build cache, isolated from the host target/
-      - ntr-cargo-registry:/usr/local/cargo/registry  # crate download cache
+      - ./data:/data
     healthcheck:
-      # /api/health is the app's liveness endpoint; the rust image (buildpack-deps base) ships curl.
-      test: ["CMD", "curl", "-fsS", "http://localhost:8080}/api/health"]
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/api/health"]
       interval: 30s
       timeout: 3s
       retries: 3
-      start_period: 300s # generous: covers the first from-source compile
+      start_period: 30s
     restart: unless-stopped
-
-volumes:
-  ntr-cargo-target:
-  ntr-cargo-registry:
