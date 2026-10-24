@@ -126,6 +126,27 @@ class Fixture:
     self.change(linked_repository=None, target_reads=0, package_reads=0, version_reads=0, association_fault={}, link_fault=None)
     self.clear_events()
 
+  def prepare_recovery(self, bump_version=True):
+    self.change(gitea_version="28.2.1")
+    result = self.release()
+    assert result.returncode != 0 and "server association safety is unverified" in result.stderr, result.stderr
+    oid, commit = self.state()["confirmed_object"], self.git("rev-parse", "HEAD")
+    if bump_version:
+      for name in ("VERSION", "Cargo.toml", "Cargo.lock", "README.md"):
+        path = self.root / name
+        path.write_text(path.read_text().replace("1.0.0", "1.0.1"))
+      (self.root / "new-notes.md").write_text("# Release v1.0.1\n\nNew recovery tooling.\n")
+      config = json.loads((self.root / "scripts/release.json").read_text())
+      config |= {"notes": "new-notes.md", "username": "new-tool"}
+      (self.root / "scripts/release.json").write_text(json.dumps(config))
+    with (self.root / "scripts/release-common.sh").open("a") as script:
+      script.write("\n# New fixture tool revision; historical identity must remain distinct.\n")
+    self.commit()
+    self.reset_association()
+    self.change(gitea_version="28.2.0")
+    (self.bin / "docker").unlink()
+    return ("--associate-existing", "v1.0.0", "--expected-tag-oid", oid, "--expected-source", commit)
+
   def connection(self, context=None, host=None, configured=None, explicit_builder=False):
     directory = self.base / "original-docker"
     directory.mkdir(exist_ok=True)
@@ -173,10 +194,10 @@ class BashReleaseTests(unittest.TestCase):
   def test_consumer_settings_version_notes_and_runtime_contract(self):
     data = helper_module()
     config = data.settings(ROOT)
-    self.assertEqual(config["version"], "0.2.6")
+    self.assertEqual(config["version"], "0.2.7")
     self.assertEqual(config["repository"], "ntr/ntr-server")
     self.assertEqual(config["image"], "git.lan/ntr/ntr-server")
-    self.assertEqual(config["notes"], "docs/releases/0.2.6.md")
+    self.assertEqual(config["notes"], "docs/releases/0.2.7.md")
     self.assertFalse((ROOT / "scripts/image_release.py").exists())
     dockerfile = (ROOT / "Dockerfile").read_text()
     for token in ("cargo build --release --locked --bin my-ntr-server", "USER 1000:1000", "EXPOSE 8080", "/data/Note.md", "/data/todo.txt", "/data/labels.json"):
@@ -706,7 +727,7 @@ class BashReleaseTests(unittest.TestCase):
       self.assert_no_writes(f)
 
   def test_unknown_server_gate_and_hidden_links_do_not_reassign(self):
-    for server in ("1.24.6", "1.26.0", "28.2.0", "1.25.0-dev"):
+    for server in ("1.24.6", "1.26.0", "28.2.1", "28.2.0-dev", "28.2.0+custom", "1.25.0-dev"):
       with self.subTest(server=server), Fixture() as f:
         f.change(gitea_version=server)
         self.assertNotEqual(f.release().returncode, 0)
