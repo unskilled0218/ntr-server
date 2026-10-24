@@ -45,7 +45,9 @@ The retired engine/test file remain in Git history before this task. Their appli
 
 The Python suite uses disposable private tokens, temporary real Git/bare remotes, and fake Docker/curl executables. No user token, Docker daemon, real registry login, source push, release creation, or package mutation is performed. Fixtures keep Cargo and README mirrors valid when injecting publication faults, and assert injection markers plus externally visible writes/state, not just a nonzero exit.
 
-Unit receiving tests cover exact byte limits/overflow, unending stdout/stderr, blocked stdin, deadlines, and descendant termination. CLI tests exercise both local hardening deviations and the publication/package state machine. These tests model endpoint/plugin discovery and synthetic TLS metadata; they do not certify the real Docker CLI, native routing, account permissions, live APIs, distributed writer exclusion, or Packages-tab rendering. Rust tests protect application behavior separately.
+Unit receiving tests cover exact byte limits/overflow, unending stdout/stderr, blocked stdin, deadlines, and descendant termination. CLI tests exercise local hardening deviations and the publication/package state machine. These tests model endpoint/plugin discovery and synthetic TLS metadata; they do not certify the real Docker CLI, native routing, account permissions, live APIs, distributed writer exclusion, or Packages-tab rendering. Rust tests protect application behavior separately.
+
+The follow-tags regression enables `push.followTags=true` after fixture source setup and creates a reachable unpublished annotated tag. Actual bare-remote refs must gain only the intended release tag, with unrelated tags staying local and source refs/configuration unchanged. Ordinary and accepted-but-lost tag pushes each occur once; completed retries must remain read-only. The regression fails against the original command because real Git publishes the unrelated tag, not because a fake requires a particular argument. This command-local isolation is an additional server hardening change; it does not resolve the separate ARM64 v8 compatibility warning.
 
 ## Optional image checks
 

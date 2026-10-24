@@ -14,6 +14,8 @@ The workflow validates committed notes, isolates authentication, and completes b
 
 The `container-release-bash/1` annotation binds version, captured commit, repository, configuration/script hashes, platforms, image digest, predecessor, and committed notes path/hash. Canonical bytes and fixed tagger identity/time make the intended object reproducible. Image labels alone or a matching version string do not establish ownership. A release API call may not silently create or repair a missing confirmed Git tag.
 
+As local hardening beyond the pinned reference, the explicit release-tag push uses `--no-follow-tags` for that invocation. An enabled `push.followTags` preference cannot add unrelated annotated tags to the push. Caller Git configuration remains unchanged; non-force publication and lost-response reconciliation retain their existing behavior.
+
 ## Retries and partial failures
 
 Absent tag and release may permit reuse of verified staging. A lost build response without recoverable staging may require another explicit build attempt; exactly-once builds are not promised. A running invocation can reconcile its own lost tag/promotion/release response from fresh exact evidence, never by blindly repeating a confirmed write.
