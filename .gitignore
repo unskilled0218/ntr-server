@@ -11,3 +11,8 @@ __pycache__/
 
 # Generated image release archives and checksums.
 /release/
+
+# Private local release coordination; never commit transaction or lock state.
+/.template-operation.lock
+/.release-template/
+/.template-transaction/

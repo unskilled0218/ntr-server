@@ -15,12 +15,7 @@ RUN apt-get update \
   && mkdir /data \
   && chown 1000:1000 /data
 COPY --from=build /build/target/release/my-ntr-server /usr/local/bin/my-ntr-server
-ARG VERSION
-ARG REVISION
-ARG SOURCE=https://git.lan/ntr/ntr-server
-LABEL org.opencontainers.image.version=$VERSION \
-  org.opencontainers.image.revision=$REVISION \
-  org.opencontainers.image.source=$SOURCE
+# The release workflow supplies and verifies version/revision/source via --label.
 ENV HOST=0.0.0.0 PORT=8080 \
   TODO_FILE=/data/todo.txt NOTE_FILE=/data/Note.md LABELS_FILE=/data/labels.json
 WORKDIR /data
