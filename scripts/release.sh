@@ -123,7 +123,7 @@ fi
 oid=$(data make-tag "$root" "$commit" "$prepared" "$predecessor" "$work/identity.json") || stop 'Cannot create exact intended tag'
 phase='tag publication'
 fresh_guard
-attempt run 1048576 60 git -C "$root" push origin "$oid:refs/tags/$tag"
+attempt run 1048576 60 git -C "$root" push --no-follow-tags origin "$oid:refs/tags/$tag"
 scan
 tag_state
 [[ "$remote_oid" == "$oid" && "$remote_commit" == "$commit" && -z "$release_record" ]] || stop 'Tag push not confirmed or release appeared'

@@ -173,10 +173,10 @@ class BashReleaseTests(unittest.TestCase):
   def test_consumer_settings_version_notes_and_runtime_contract(self):
     data = helper_module()
     config = data.settings(ROOT)
-    self.assertEqual(config["version"], "0.2.5")
+    self.assertEqual(config["version"], "0.2.6")
     self.assertEqual(config["repository"], "ntr/ntr-server")
     self.assertEqual(config["image"], "git.lan/ntr/ntr-server")
-    self.assertEqual(config["notes"], "docs/releases/0.2.5.md")
+    self.assertEqual(config["notes"], "docs/releases/0.2.6.md")
     self.assertFalse((ROOT / "scripts/image_release.py").exists())
     dockerfile = (ROOT / "Dockerfile").read_text()
     for token in ("cargo build --release --locked --bin my-ntr-server", "USER 1000:1000", "EXPOSE 8080", "/data/Note.md", "/data/todo.txt", "/data/labels.json"):
@@ -247,6 +247,46 @@ class BashReleaseTests(unittest.TestCase):
         self.assert_no_writes(f)
         self.assertFalse(any(e.startswith("registry:rt-") for e in f.events()))
         self.assertEqual(f.git("ls-remote", "--tags", "origin", "refs/tags/v1.0.0").split()[0], oid)
+
+  def test_follow_tags_setting_cannot_expand_publication_or_completed_retry(self):
+    for lost in (False, True):
+      with self.subTest(lost_tag_response=lost), Fixture() as f:
+        # Source setup must finish before enabling follow-tags or creating this tag.
+        f.git("config", "push.followTags", "true")
+        f.git("tag", "-a", "unrequested-tag", "-m", "Keep this annotation local")
+        self.assertEqual(f.git("config", "--bool", "push.followTags"), "true")
+        local_tag = f.git("rev-parse", "refs/tags/unrequested-tag")
+        source = f.git("rev-parse", "HEAD")
+        self.assertEqual(f.git("cat-file", "-t", local_tag), "tag")
+        self.assertEqual(f.git("rev-parse", "unrequested-tag^{}"), source)
+        before = dict(line.split()[::-1] for line in f.git("ls-remote", "origin").splitlines())
+        self.assertNotIn("refs/tags/unrequested-tag", before)
+        self.assertEqual(before["refs/heads/main"], source)
+        configuration = (f.root / ".git/config").read_bytes()
+        f.change(lose_tag=lost)
+
+        result = f.release()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Publication verified: v1.0.0", result.stdout)
+        for action in WRITES:
+          self.assertEqual(f.events().count(action), 1, action)
+        after = dict(line.split()[::-1] for line in f.git("ls-remote", "origin").splitlines())
+        self.assertEqual(set(after) - set(before), {"refs/tags/v1.0.0", "refs/tags/v1.0.0^{}"}, after)
+        self.assertEqual({ref: after.get(ref) for ref in before}, before)
+        self.assertEqual(after["refs/tags/v1.0.0^{}"], source)
+        self.assertEqual(after["refs/tags/v1.0.0"], f.state()["confirmed_object"])
+        self.assertEqual(f.git("rev-parse", "refs/tags/unrequested-tag"), local_tag)
+        self.assertEqual(f.git("config", "--bool", "push.followTags"), "true")
+        self.assertEqual((f.root / ".git/config").read_bytes(), configuration)
+
+        f.clear_events()
+        result = f.release()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assert_no_writes(f)
+        self.assertEqual(dict(line.split()[::-1] for line in f.git("ls-remote", "origin").splitlines()), after)
+        self.assertEqual(f.git("rev-parse", "refs/tags/unrequested-tag"), local_tag)
+        self.assertEqual(f.git("config", "--bool", "push.followTags"), "true")
+        self.assertEqual((f.root / ".git/config").read_bytes(), configuration)
 
   def test_lost_accepted_writes_reconcile_once_without_replay(self):
     with Fixture() as f:
