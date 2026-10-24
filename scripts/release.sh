@@ -3,14 +3,22 @@
 set -Eeuo pipefail
 set +x
 export PYTHONDONTWRITEBYTECODE=1
-usage() { echo 'Usage: ./scripts/release.sh [--validate | --help]'; }
-[[ $# -le 1 ]] || { usage >&2; exit 2; }
+usage() {
+  echo 'Usage: ./scripts/release.sh [--validate | --help]'
+  echo '       ./scripts/release.sh --associate-existing <tag> --expected-tag-oid <oid> --expected-source <commit>'
+}
+mode=publish
 case "$#:${1:-}" in
   1:--help)
     usage
     echo 'No arguments: build and publish the configured project. Setup: scripts/release.json and a private token file.'
     exit 0 ;;
   1:--validate|0:) ;;
+  6:--associate-existing)
+    [[ ${#2} -le 17 && "$2" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ &&
+       "$3" == --expected-tag-oid && "$4" =~ ^[0-9a-f]{40}$ &&
+       "$5" == --expected-source && "$6" =~ ^[0-9a-f]{40}$ ]] || { usage >&2; exit 2; }
+    mode=associate ;;
   *) echo 'Unsupported arguments.' >&2; usage >&2; exit 2 ;;
 esac
 for deprecated in "${!FORGEJO_@}"; do
@@ -25,14 +33,16 @@ if [[ "${1:-}" == --validate ]]; then
   echo 'Configuration valid; no credentials or remote operations used'
   exit 0
 fi
-for tool in git docker curl; do
+tools=(git curl)
+[[ "$mode" != publish ]] || tools+=(docker)
+for tool in "${tools[@]}"; do
   command -v "$tool" >/dev/null || stop "Required command unavailable: $tool"
 done
 for marker in release-template.lock.json scripts/release-template .template-transaction; do
   [[ ! -e "$root/$marker" && ! -L "$root/$marker" ]] || stop 'Old installation state; use its preserved original checkout/pin, not this command'
 done
 if [[ -z "${RELEASE_LOCK_FD:-}" ]]; then
-  exec python3 -B "$root/scripts/release-data.py" locked "$root" "$root/scripts/release.sh"
+  exec python3 -B "$root/scripts/release-data.py" locked "$root" "$root/scripts/release.sh" "$@"
 fi
 data lock-check "$root"
 umask 077
@@ -43,15 +53,29 @@ trap cleanup EXIT
 trap 'echo "Publication incomplete/uncertain during $phase; inspect exact remaining objects without rollback" >&2' ERR
 trap 'exit 130' INT
 trap 'exit 143' TERM
+started=$(data clock)
+export RELEASE_PROGRESS_START=$started
+stage 'local setup'
 data settings "$root" "$work/settings.json"
 tag=$(field "$work/settings.json" tag)
 version=$(field "$work/settings.json" version)
 origin=$(field "$work/settings.json" gitea)
 repository=$(field "$work/settings.json" repository)
 image=$(field "$work/settings.json" image)
-printf 'Release target: %s / %s (%s)\n' "$repository" "$image" "$tag"
+if [[ "$mode" == associate ]]; then
+  printf 'Association target: %s / %s (%s)\n' "$repository" "$image" "$2"
+else
+  printf 'Release target: %s / %s (%s)\n' "$repository" "$image" "$tag"
+fi
 [[ ! -e "$root/.release-template/$tag.json" && ! -L "$root/.release-template/$tag.json" ]] || stop 'Legacy checkpoint exists; preserve its original checkout/pin'
-phase='source and builder preflight'
+if [[ "$mode" == associate ]]; then
+  stage 'existing recovery'
+  data source "$root" >/dev/null || stop 'Cannot verify recovery tool source'
+  data auth-api "$root" "$work"
+  data recover-association "$root" "$work" "$2" "$4" "$6"
+  exit 0
+fi
+stage 'source and builder preflight'
 original_docker_context=${DOCKER_CONTEXT-}
 original_docker_config=${DOCKER_CONFIG:-$HOME/.docker}
 run 1048576 60 docker buildx inspect --bootstrap
@@ -75,12 +99,12 @@ else
 fi
 run 1048576 60 docker info --format '{{json .ClientInfo.Plugins}}'
 data plugin-check "$work/command.out" "$work/plugin.json"
-phase='read-only startup classification'
+stage 'read-only startup classification'
 data inventory "$root" "$work" "$work/inventory.json"
 tag_state
 if [[ -n "$remote_oid" || -n "$release_record" ]]; then
   [[ -n "$remote_oid" && -n "$release_record" && "$remote_commit" == "$commit" ]] || stop 'Ambiguous tag-only/release-only or conflicting startup state; inspect without repair'
-  phase='completed-publication verification'
+  stage 'completed-publication verification'
   run 1048576 60 git -C "$root" fetch --no-tags --no-write-fetch-head origin "$remote_oid"
   data inspect-tag "$root" "$commit" "$remote_oid" "$work/identity.json"
   prepared=$(field "$work/identity.json" digest)
@@ -97,7 +121,7 @@ if [[ -n "$remote_oid" || -n "$release_record" ]]; then
   success
   exit 0
 fi
-phase='fresh-publication preparation'
+stage 'fresh-publication preparation'
 tag_confirmed=false
 promotion_confirmed=false
 run 65536 60 git -C "$root" tag --list "$tag"
@@ -110,7 +134,7 @@ if [[ -z "$prepared" ]]; then
   fresh_guard
   login
   data snapshot "$root" "$commit" "$work/source"
-  phase='staging build and immutable verification'
+  stage 'staging build and immutable verification'
   run 16777216 7200 docker buildx build --platform linux/amd64,linux/arm64 --provenance=false \
     --metadata-file "$work/build.json" --push --tag "$image:$staging" \
     --label "org.opencontainers.image.version=$version" --label "org.opencontainers.image.revision=$commit" \
@@ -118,17 +142,18 @@ if [[ -z "$prepared" ]]; then
   prepared=$(data image "$root" "$work" "$staging" "$commit") || stop 'Cannot verify built image'
   data metadata "$work/build.json" "$prepared"
 else
+  data progress 'staging reuse'
   login
 fi
 oid=$(data make-tag "$root" "$commit" "$prepared" "$predecessor" "$work/identity.json") || stop 'Cannot create exact intended tag'
-phase='tag publication'
+stage 'tag publication'
 fresh_guard
 attempt run 1048576 60 git -C "$root" push --no-follow-tags origin "$oid:refs/tags/$tag"
 scan
 tag_state
 [[ "$remote_oid" == "$oid" && "$remote_commit" == "$commit" && -z "$release_record" ]] || stop 'Tag push not confirmed or release appeared'
 tag_confirmed=true
-phase='digest promotion'
+stage 'digest promotion'
 fresh_guard
 promotion_latest=$(data resolve "$root" "$work" latest) || stop 'Cannot read latest before promotion'
 [[ "$promotion_latest" == "$predecessor" || "$promotion_latest" == "$prepared" ]] || stop 'Latest changed before promotion'
@@ -137,10 +162,10 @@ if [[ "$promotion_latest" != "$prepared" ]]; then
 fi
 [[ $(data resolve "$root" "$work" latest) == "$prepared" ]] || stop 'Promotion not confirmed'
 promotion_confirmed=true
-phase='release creation'
+stage 'release creation'
 fresh_guard
 attempt data http "$work" POST "$origin/api/v1/repos/$repository/releases" "$work/post.json" "$work/payload.json" > "$work/post.status"
-phase='final publication verification'
+stage 'final publication verification'
 scan
 tag_state
 [[ "$remote_oid" == "$oid" && "$remote_commit" == "$commit" && -n "$release_record" ]] || stop 'Release creation not confirmed'

@@ -142,6 +142,9 @@ if tool == "git":
   sys.exit(result.returncode)
 
 if tool == "docker":
+  if state.get("secret_output"):
+    print("SENTINEL_PRIVATE_TOKEN UNRELATED_AUTH_SENTINEL", file=sys.stderr)
+    event("secret-output-injected")
   selection = docker_selection()
   with (base / "docker-selections").open("a") as output:
     output.write(json.dumps(selection) + "\n")
@@ -180,6 +183,9 @@ if tool == "docker":
       event("docker-failed:build")
       sys.exit(1)
     if state.get("hang_build"):
+      if state.get("secret_output"):
+        print("SENTINEL_PRIVATE_TOKEN UNRELATED_AUTH_SENTINEL", flush=True)
+        event("build-secret-output-injected")
       time.sleep(20)
     context = Path(arguments[-1])
     assert (context / "Dockerfile").is_file() and not (context / ".git").exists() and not (context / "ignored-secret").exists()
@@ -225,6 +231,9 @@ raw_body = None
 target_repository = {"id": 17, "name": "application", "full_name": "fixtures/application", "owner": {"login": "fixtures"}}
 association_resource = None
 event("http:" + method + ":" + route)
+if state.get("hang_http"):
+  event("http-hang-injected")
+  time.sleep(20)
 if route == "/api/v1/version" and method == "GET":
   association_resource = "version"
   body = {"version": state.get("gitea_version", "1.25.0")}
@@ -346,6 +355,11 @@ if association_resource:
       body["id"] = 99
     elif kind == "change_latest":
       state["aliases"]["latest"] = store({"foreign": True})
+    elif kind == "change_tool":
+      with (base / "project with spaces/scripts/release-common.sh").open("a") as script:
+        script.write("\n# Concurrent tool change injected by the fixture.\n")
+    elif kind == "change_tag":
+      subprocess.run(["/usr/bin/git", "--git-dir", str(base / "remote.git"), "update-ref", "-d", "refs/tags/v1.0.0"], check=True)
     else:
       raise AssertionError("Unexpected association fault")
   save()

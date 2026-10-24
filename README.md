@@ -5,7 +5,7 @@
 
 A single-binary Rust HTTP server for todo.txt tasks and a Markdown note. Stores data in plain files and sends live updates to connected clients.
 
-Version 0.2.6 is prepared locally. See [release notes](docs/releases/0.2.6.md) and the [container release workflow](docs/image-release.md); preparation does not mean publication.
+Version 0.2.7 is prepared locally. See [release notes](docs/releases/0.2.7.md) and the [container release workflow](docs/image-release.md); preparation does not mean publication.
 
 ## Quick start
 

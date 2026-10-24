@@ -32,6 +32,45 @@ ITEM_LIMIT = 100000
 READ_SECONDS = 60
 MARKER = "container-release-bash/1\n"
 PLATFORMS = ["linux/amd64", "linux/arm64"]
+PROGRESS = {
+  "local setup": "Validating local release settings",
+  "source and builder preflight": "Checking source and selected builder",
+  "read-only startup classification": "Reading complete publication inventories",
+  "completed-publication verification": "Verifying an existing publication; no publication writes",
+  "fresh-publication preparation": "Preparing a new publication",
+  "staging reuse": "Reusing verified staging content",
+  "staging build and immutable verification": "Building staging content and verifying immutable images",
+  "tag publication": "Publishing the exact non-force Git tag",
+  "digest promotion": "Promoting the verified digest to latest",
+  "release creation": "Creating the notes-only release",
+  "final publication verification": "Verifying accepted publication state",
+  "package association": "Publication verified; checking package association",
+  "association contract": "Checking the supported package-link server contract",
+  "association write": "Attempting one package link; outcome requires verification",
+  "association uncertain": "Link response lost; reconciling once through readback",
+  "association confirmed": "Package association verified",
+  "already linked": "Package already linked correctly; no additional association write",
+  "write uncertain": "Write response failed; reconciling through exact evidence",
+  "existing recovery": "Verifying pinned historical publication for association only",
+  "recovery verified": "Historical publication verified; no rebuild or republication",
+  "waiting": "Still waiting for the bounded operation",
+}
+
+
+def progress(key):
+  now = time.monotonic()
+  started = float(os.environ.get("RELEASE_PROGRESS_START", now))
+  print(f"[release +{max(0, now - started):.0f}s] {PROGRESS[key]}", file=sys.stderr, flush=True)
+
+
+class Heartbeat:
+  def __init__(self, started):
+    self.next = started + 10
+
+  def tick(self, now):
+    if now >= self.next:
+      progress("waiting")
+      self.next = now + 10
 
 
 class Refusal(Exception):
@@ -115,21 +154,21 @@ def normalize_notes(raw, tag):
   return text
 
 
-def rust_mirrors(root, release_version):
-  manifest = tomllib.loads(read(regular(root, "Cargo.toml")).decode())
+def rust_mirrors(read_input, release_version):
+  manifest = tomllib.loads(read_input("Cargo.toml").decode())
   require(manifest.get("package", {}).get("name") == "my-ntr-server" and
           manifest["package"].get("version") == release_version, "Cargo.toml must mirror VERSION for my-ntr-server")
-  lock = tomllib.loads(read(regular(root, "Cargo.lock")).decode())
+  lock = tomllib.loads(read_input("Cargo.lock").decode())
   entries = [p for p in lock.get("package", []) if isinstance(p, dict) and p.get("name") == "my-ntr-server"]
   require(len(entries) == 1 and entries[0].get("version") == release_version, "Cargo.lock must mirror VERSION")
-  readme = read(regular(root, "README.md")).decode()
+  readme = read_input("README.md").decode()
   require(re.search(r"\bVersion " + re.escape(release_version) + r"\b", readme) and
           "](docs/releases/" + release_version + ".md)" in readme, "README prepared version/notes must mirror VERSION")
 
 
-def settings(root):
-  root = Path(root)
-  config = document(regular(root, "scripts/release.json"), ANNOTATION_LIMIT)
+def settings_inputs(read_input):
+  raw_config = read_input("scripts/release.json", ANNOTATION_LIMIT)
+  config = decode(raw_config)
   fields = {"schema", "gitea", "repository", "image", "username", "token_file", "notes", "platforms"}
   require(isinstance(config, dict) and set(config) == fields and type(config["schema"]) is int and config["schema"] == 1,
           "Invalid Bash release configuration")
@@ -145,17 +184,21 @@ def settings(root):
   require(re.fullmatch(re.escape(origin.netloc + "/" + owner + "/") + name, config["image"]), "Image scope differs")
   require(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", config["username"]), "Invalid login")
   require(config["platforms"] == PLATFORMS, "Require linux/amd64 and linux/arm64 in that order")
-  regular(root, "Dockerfile")
-  regular(root, ".dockerignore")
-  release_version = read(regular(root, "VERSION"), 128).decode().strip()
+  read_input("Dockerfile")
+  read_input(".dockerignore")
+  release_version = read_input("VERSION", 128).decode().strip()
   version(release_version)
   require(len(release_version) <= 16, "Version exceeds supported registry-tag length")
-  rust_mirrors(root, release_version)
-  normalize_notes(read(regular(root, config["notes"]), ANNOTATION_LIMIT), "v" + release_version)
-  script_hash = sha(b"".join(name.encode() + b"\x00" + read(regular(root, "scripts/" + name)) for name in
-                             ("release.sh", "release-common.sh", "release-data.py")))
+  rust_mirrors(read_input, release_version)
+  normalize_notes(read_input(config["notes"], ANNOTATION_LIMIT), "v" + release_version)
+  script_hash = sha(b"".join(name.encode() + b"\x00" + read_input("scripts/" + name) for name in
+                              ("release.sh", "release-common.sh", "release-data.py")))
   return config | {"gitea": config["gitea"].rstrip("/"), "version": release_version, "tag": "v" + release_version,
-                   "config_hash": sha(read(root / "scripts/release.json", ANNOTATION_LIMIT)), "script_hash": script_hash}
+                   "config_hash": sha(raw_config), "script_hash": script_hash}
+
+
+def settings(root):
+  return settings_inputs(lambda name, limit=API_LIMIT: read(regular(root, name), limit))
 
 
 def capture(arguments, limit=REF_LIMIT, seconds=READ_SECONDS, input_data=None, streams=None):
@@ -188,10 +231,14 @@ def capture(arguments, limit=REF_LIMIT, seconds=READ_SECONDS, input_data=None, s
     if input_data is not None:
       os.set_blocking(process.stdin.fileno(), False)
       selector.register(process.stdin.fileno(), selectors.EVENT_WRITE, "stdin")
-    deadline = time.monotonic() + seconds
-    while selector.get_map():
-      if time.monotonic() >= deadline:
+    started = time.monotonic()
+    deadline = started + seconds
+    heartbeat = Heartbeat(started)
+    while selector.get_map() or process.poll() is None:
+      now = time.monotonic()
+      if now >= deadline:
         raise CommandFailed("Command timed out")
+      heartbeat.tick(now)
       for key, _ in selector.select(min(0.1, max(0, deadline - time.monotonic()))):
         name = key.data
         if name == "stdin":
@@ -282,7 +329,7 @@ def source(root, expected=None, remote=True):
   return commit
 
 
-def blob(root, commit, name):
+def blob(root, commit, name, limit=ANNOTATION_LIMIT):
   path_text(name)
   tree = git(root, "--literal-pathspecs", "ls-tree", "-z", commit, "--", name, limit=ANNOTATION_LIMIT)
   entries = tree.rstrip(b"\x00").split(b"\x00")
@@ -290,8 +337,8 @@ def blob(root, commit, name):
   fields, filename = entries[0].split(b"\t", 1)
   mode, kind, oid = fields.decode().split()
   require(mode in ("100644", "100755") and kind == "blob" and filename.decode() == name, "Notes must be a regular committed blob")
-  require(int(git(root, "cat-file", "-s", oid)) <= ANNOTATION_LIMIT, "Notes exceed byte limit")
-  return git(root, "cat-file", "blob", oid, limit=ANNOTATION_LIMIT)
+  require(int(git(root, "cat-file", "-s", oid)) <= limit, "Committed input exceeds byte limit")
+  return git(root, "cat-file", "blob", oid, limit=limit)
 
 
 def notes(root, commit, config):
@@ -314,7 +361,7 @@ def plugin_identity(path):
   return {"path": str(executable), "version": value["Version"], "digest": fingerprint}
 
 
-def auth(root, work):
+def auth(root, work, docker_auth=True):
   config = settings(root)
   username = os.environ.get("GIT_USERNAME", config["username"])
   require(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", username), "Invalid login")
@@ -337,6 +384,11 @@ def auth(root, work):
   (work / "api.curl").write_text('header = "Authorization: token ' + token + '"\n')
   basic = base64.b64encode((username + ":" + token).encode()).decode()
   (work / "registry.curl").write_text('header = "Authorization: Basic ' + basic + '"\n')
+  for path in work.iterdir():
+    if path.is_file():
+      path.chmod(0o600)
+  if not docker_auth:
+    return
   original = Path(os.environ.get("DOCKER_CONFIG") or str(Path.home() / ".docker"))
   docker = work / "docker"
   docker.mkdir()
@@ -427,28 +479,41 @@ def package_linked(work, config, package_url, target_id):
   return True
 
 
-def package_association(work, config, ensure=False):
+def package_contract(record):
+  require(isinstance(record, dict) and isinstance(record.get("version"), str), "Invalid server version evidence")
+  value = record["version"]
+  require(value == "28.2.0" or re.fullmatch(r"1\.25\.(0|[1-9][0-9]*)", value),
+          "Package link writes require supported stable Gitea 1.25.x or 28.2.0; server association safety is unverified")
+
+
+def package_association(work, config, ensure=False, before_write=None):
   """Only explicit unlinked evidence authorizes one POST, under operator writer exclusion."""
   target_url, package_url, link_url = package_routes(config)
   target_id = repository_identity(api_document(work, target_url), config["repository"])
   if package_linked(work, config, package_url, target_id):
+    progress("already linked")
     return
   require(ensure, "Package is not linked to the configured repository")
+  progress("association contract")
   server = api_document(work, config["gitea"] + "/api/v1/version")
-  require(isinstance(server, dict) and isinstance(server.get("version"), str) and
-          re.fullmatch(r"1\.25\.(0|[1-9][0-9]*)", server["version"]),
-          "Package link writes require supported stable Gitea 1.25.x; server association safety is unverified")
+  package_contract(server)
   require(repository_identity(api_document(work, target_url), config["repository"]) == target_id,
           "Package target repository changed")
   if package_linked(work, config, package_url, target_id):
+    progress("already linked")
     return
+  if before_write is not None:
+    before_write()
+  progress("association write")
   try:
     status, _, response = http(work, "POST", link_url)
     require(status == 201 and response == b"", "Package association POST failed; inspect without rollback")
   except CommandFailed:
-    pass  # One exact read may reconcile a lost response; never repeat the POST.
+    # One exact read may reconcile a lost response; never repeat the POST.
+    progress("association uncertain")
   require(package_linked(work, config, package_url, target_id),
           "Package association incomplete or uncertain; inspect without rollback")
+  progress("association confirmed")
 
 
 def registry(work, origin, image, kind, reference, missing=False):
@@ -611,6 +676,48 @@ def release_check(record, root, commit, config):
   require(body == notes(root, commit, config), "Release notes differ")
 
 
+def recover_association(root, work, tag, expected_oid, expected_source):
+  """Verify historical data under explicit pins; never execute historical scripts."""
+  require(tag.startswith("v"), "Expected a version tag")
+  version(tag[1:])
+  require(re.fullmatch(r"[0-9a-f]{40}", expected_oid) and re.fullmatch(r"[0-9a-f]{40}", expected_source),
+          "Expected exact Git object and source pins")
+  current_config = settings(root)
+  require(current_config == document(Path(work) / "settings.json"), "Captured configuration/scripts changed")
+  current_source = source(root)
+  selection = current_config | {"tag": tag, "version": tag[1:]}
+  observed = inventory(root, work, selection)
+  require(observed["object"] == expected_oid and observed["commit"] == expected_source and observed["release"],
+          "Pinned historical tag/release is missing, partial, or different")
+  git(root, "fetch", "--no-tags", "--no-write-fetch-head", "origin", expected_oid)
+  git(root, "merge-base", "--is-ancestor", expected_source, current_source)
+  historical = settings_inputs(lambda name, limit=API_LIMIT: blob(root, expected_source, name, limit))
+  require(historical["tag"] == tag and all(historical[k] == current_config[k] for k in ("gitea", "repository", "image")),
+          "Historical version or target scope differs")
+  identity = inspect_tag(root, expected_source, expected_oid, historical)
+  prepared = identity["digest"]
+
+  def verify():
+    require(settings(root) == current_config, "Captured configuration/scripts changed")
+    source(root, current_source)
+    evidence = inventory(root, work, historical)
+    require(evidence["object"] == expected_oid and evidence["commit"] == expected_source and evidence["release"],
+            "Historical publication changed during association")
+    release_check(evidence["release"], root, expected_source, historical)
+    require(image(work, historical, prepared, expected_source) == prepared, "Bound historical image differs")
+    latest = registry(work, historical["gitea"], historical["image"], "manifests", "latest", True)
+    require(latest is not None and latest[0] == prepared, "Historical latest is missing, advanced, or foreign; no repair authority")
+
+  verify()
+  progress("recovery verified")
+  progress("package association")
+  package_association(work, historical, ensure=True, before_write=verify)
+  progress("final publication verification")
+  verify()
+  package_association(work, historical)
+  print(f"Association verified: {tag}\nImage: {historical['image']}@{prepared}\nNo rebuild or republication performed")
+
+
 def snapshot(root, commit, destination):
   target = Path(destination)
   target.mkdir()
@@ -645,6 +752,10 @@ def dispatch(args):
   action, *args = args
   if action == "settings":
     write(args[1], settings(args[0]))
+  elif action == "clock":
+    print(time.monotonic())
+  elif action == "progress":
+    progress(args[0])
   elif action == "field":
     value = document(args[0])
     for key in args[1].split("."):
@@ -658,6 +769,10 @@ def dispatch(args):
     require(plugin_identity(args[0]) == document(args[1]), "Selected Buildx plugin changed under isolated authentication")
   elif action == "auth":
     auth(*args)
+  elif action == "auth-api":
+    auth(*args, docker_auth=False)
+  elif action == "recover-association":
+    recover_association(*args)
   elif action == "run":
     limit, seconds, output, *arguments = args
     Path(output).write_bytes(command(arguments, int(limit), float(seconds)))
@@ -710,13 +825,13 @@ def dispatch(args):
     advertised = {value.strip().rstrip("*") for line in matches for value in line.split(",")}
     require(set(PLATFORMS) <= advertised, "Builder must advertise linux/amd64 and linux/arm64")
   elif action == "locked":
-    root, script = args
+    root, script, *options = args
     path = Path(root) / ".template-operation.lock"
     fd = os.open(path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
     try:
       fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
       environment = os.environ | {"RELEASE_LOCK_FD": str(fd)}
-      child = subprocess.Popen(["bash", script], env=environment, pass_fds=(fd,), start_new_session=True)
+      child = subprocess.Popen(["bash", script, *options], env=environment, pass_fds=(fd,), start_new_session=True)
       def forward(number, _frame):
         try:
           os.killpg(child.pid, number)

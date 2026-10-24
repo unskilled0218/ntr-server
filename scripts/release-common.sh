@@ -2,6 +2,7 @@
 # Adapted from container-release-template 3c73528231ac1cbdd43600a5ca723390db804bac.
 data() { python3 -B "$root/scripts/release-data.py" "$@"; }
 field() { data field "$1" "$2"; }
+stage() { phase=$1; data progress "$phase"; }
 stop() { echo "Release stopped (${phase:-local setup}): $*; inspect partial state without rollback" >&2; exit 1; }
 run() { data run "$1" "$2" "$work/command.out" "${@:3}"; }
 login() {
@@ -12,6 +13,7 @@ attempt() {
   local status
   if "$@"; then return 0; else status=$?; fi
   [[ "$status" == 2 ]] || stop 'Input/resource refusal; remote outcome may be incomplete'
+  data progress 'write uncertain'
 }
 scan() {
   data source "$root" "$commit" >/dev/null || stop 'Cannot verify captured source'
@@ -58,7 +60,7 @@ publication_guard() {
 }
 associate_package() {
   local expected_oid=$1
-  phase='package association'
+  stage 'package association'
   publication_guard "$expected_oid"
   data package-ensure "$root" "$work" || stop 'Package association failed or uncertain'
   publication_guard "$expected_oid"
