@@ -1,15 +1,17 @@
 # Docker Compose
 
-Run commands from the server repository root. Compose pulls `git.lan/ntr/ntr-server:0.2.4`, a shared amd64/arm64 image; Docker selects the host's architecture. No source mount or Rust compiler is needed. The version must first be published through the [image release workflow](image-release.md).
+- [Start](#start)
+- [Configuration](#configuration)
+- [Upgrade and rollback](#upgrade-and-rollback)
+
+Run commands from the server repository root. Compose selects `git.lan/ntr/ntr-server:latest`, a mutable shared amd64/arm64 image; Docker selects the host's architecture. No source mount or Rust compiler is needed. A separately approved first publication must establish this alias through the [image release workflow](image-release.md); local preparation is not publication. For reproducible deployments, replace it with a verified immutable index digest.
 
 ## Start
 
 If the package is private, authenticate with a Forgejo username and token allowed to read it. Public packages may be pulled without login:
 
 ```bash
-FORGEJO_TOKEN="$(<"$HOME/.config/forgejo/forgejo-token")"
-printf '%s' "$FORGEJO_TOKEN" | docker login git.lan --username your-login --password-stdin
-unset FORGEJO_TOKEN
+docker login git.lan --username your-login --password-stdin < "$HOME/.config/git/token"
 ```
 
 Ensure the data directory exists before starting and is writable by the container's fixed UID/GID `1000:1000`. The server's atomic writes need directory access, not merely write access to an existing file. Resolve incompatible permissions with the data owner before deployment; Compose does not change host file ownership:
@@ -31,7 +33,7 @@ Tasks, notes, and remembered labels live in host `./data/todo.txt`, `./data/Note
 
 The Compose file uses fixed values with no shell-variable interpolation:
 
-- Image: `git.lan/ntr/ntr-server:0.2.4`.
+- Image: `git.lan/ntr/ntr-server:latest` (mutable; pin a verified index digest for reproducibility).
 - Runtime UID/GID: `1000:1000`.
 - Host mapping: `127.0.0.1:8080:8080`.
 - Container binding inherited from the image: `HOST=0.0.0.0`, `PORT=8080`.
@@ -42,7 +44,7 @@ The Compose service has no `environment` section. Shell variables such as `NTR_I
 
 ## Upgrade and rollback
 
-Back up `./data`, then update the literal `image` reference in `docker-compose.yml` to the desired published version or index digest before pulling and starting:
+Back up `./data`, then update the literal `image` reference in `docker-compose.yml` to the desired verified index digest before pulling and starting. New template-derived publications do not create versioned container aliases; older published version aliases remain historical artifacts. Pulling `latest` instead follows whichever release currently owns that mutable alias:
 
 ```sh
 docker compose pull
@@ -52,4 +54,4 @@ docker compose ps
 
 For a digest-pinned deployment, set the file's `image` value to `git.lan/ntr/ntr-server@sha256:<index-digest>` using the release output. Pin the index digest to retain automatic amd64/arm64 selection; a platform digest pins only one architecture.
 
-To roll back, change the file's `image` value to the previous published version/index digest and repeat pull/startup. Keep the same data mount and runtime UID/GID. Container replacement does not remove the host data directory; never delete it as part of an image upgrade.
+To roll back a deployment, change the file's `image` value to a previously verified index digest or an older existing version alias and repeat pull/startup. Do not roll back registry aliases or rewrite release records. Keep the same data mount and runtime UID/GID. Container replacement does not remove the host data directory; never delete it as part of an image upgrade.

@@ -1,6 +1,11 @@
 # my-ntr-server
 
+- [Quick start](#quick-start)
+- [Documentation](#documentation)
+
 A single-binary Rust HTTP server for todo.txt tasks and a Markdown note. Stores data in plain files and sends live updates to connected clients.
+
+Version 0.2.5 is prepared locally. See [release notes](docs/releases/0.2.5.md) and the [container release workflow](docs/image-release.md); preparation does not mean publication.
 
 ## Quick start
 

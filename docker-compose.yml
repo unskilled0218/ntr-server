@@ -2,7 +2,7 @@
 # See docs/docker-compose.md for registry login, deployment, and data permissions.
 services:
   ntr-server:
-    image: git.lan/ntr/ntr-server:0.2.4
+    image: git.lan/ntr/ntr-server:latest
     user: "1000:1000"
     ports:
       - "127.0.0.1:8080:8080"
