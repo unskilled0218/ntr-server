@@ -9,7 +9,7 @@
 
 Use this explicit mode only after separate approval to finish package association for an existing accepted publication. The ordinary no-argument publisher binds its current source/configuration/scripts/notes to its release tag. Upgrading those tools or preparing `0.2.7` does not grant ownership of the old `v0.2.6` identity; changing hashes, recreating tags, or publishing again is not recovery.
 
-Recovery needs Bash, Python 3.11+, Git, curl, normal HTTPS trust, and current protected external credentials. It does not need Docker, Buildx, a running daemon, emulation, or a registry login. API/repository/registry reads and the single missing-link write still require real account permissions; a read-only token cannot create a link. See [credentials](release-configuration.md#credentials-and-tools) and the [reviewed server contract](package-association-contract.md).
+Recovery needs Bash, Python 3.11+, Git, curl, normal HTTPS trust, and current protected external credentials. It does not need Docker, Buildx, a running daemon, emulation, or a registry login. API/repository/registry reads and the single missing-link write still require real account permissions; a read-only token cannot create a link. See [credentials](release.md#credentials-and-tools) and the [reviewed server contract](package-association-contract.md).
 
 ## Approval and trusted pins
 

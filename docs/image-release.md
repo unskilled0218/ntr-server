@@ -18,9 +18,7 @@ To finish association for an older publication after upgrading the tools, use th
 
 ## Documentation
 
-- [Configuration and migration](release-configuration.md)
-- [Publication, recovery, and package association](release-publication.md)
-- [Verification and behavior mapping](release-verification.md)
+- [Configuration, publication, and verification](release.md)
 - [Package association contract](package-association-contract.md)
 - [Pinned association recovery](package-association-recovery.md)
 - [Server changes](releases/0.2.9.md)
