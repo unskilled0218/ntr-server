@@ -350,7 +350,7 @@ dependencies = [
 
 [[package]]
 name = "my-ntr-server"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "axum",
  "chrono",

@@ -6,7 +6,6 @@ All task responses use this JSON shape:
 {
   "id": 1,
   "completed": false,
-  "priority": "A",
   "completion_date": null,
   "creation_date": "2026-06-19",
   "description": "buy milk +groceries @store due:2026-06-30",
@@ -20,7 +19,7 @@ All task responses use this JSON shape:
 | Method & path | Description |
 | --- | --- |
 | `GET /api/health` | Liveness check. |
-| `GET /api/tasks` | List tasks. Filters: `completed`, `priority`, `project`, `context`. |
+| `GET /api/tasks` | List tasks. Filters: `completed`, `project`, `context`. |
 | `POST /api/tasks` | Create from `{ "text": "<todo.txt line>" }`. |
 | `GET /api/tasks/{id}` | Fetch one task. |
 | `PUT /api/tasks/{id}` | Replace from `{ "text": "<todo.txt line>" }`. |
@@ -36,3 +35,7 @@ All task responses use this JSON shape:
 | `GET /api/events` | Server-Sent Events stream of `change` events (`tasks` / `note`) for live updates. |
 
 See [Task IDs](task-ids.md) for ID lifetime and [Live updates](live-updates.md) for event behavior.
+
+Priority is absent from task DTOs and stores. Any `priority` query parameter returns HTTP 400 with `{ "error": "Priority filtering is no longer supported" }`, including a bare key, empty, invalid, repeated, or URL-encoded key. Supported filters keep their existing validation. Older clients relying on priority are unsupported.
+
+`raw` preserves hidden leading legacy tokens; `description` excludes only that leading token and lifecycle dates. `pri:` tokens remain visible, editable description text. Complete/reopen never convert these tokens. New clients must validate raw completion state, dates, and description before reconstructing a hidden token during editing. See [todo.txt support and mixed-version limits](todo-txt.md).

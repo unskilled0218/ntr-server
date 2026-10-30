@@ -106,6 +106,52 @@ async fn health_ok() {
 }
 
 #[tokio::test]
+async fn rejects_every_priority_query_before_supported_filter_validation() {
+  let app = app("removed-filter");
+  for query in [
+    "priority",
+    "priority=",
+    "priority=A",
+    "priority=invalid",
+    "priority=A&priority=B",
+    "%70riority=A",
+    "completed=bad&priority=",
+    "project=work&context=phone&priority=A",
+  ] {
+    let response = app
+      .clone()
+      .oneshot(get(&format!("/api/tasks?{query}")))
+      .await
+      .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{query}");
+    assert_eq!(
+      body_json(response).await["error"],
+      "Priority filtering is no longer supported"
+    );
+  }
+  for query in [
+    "completed=false",
+    "project=work&context=phone",
+    "unknown=value",
+  ] {
+    let response = app
+      .clone()
+      .oneshot(get(&format!("/api/tasks?{query}")))
+      .await
+      .unwrap();
+    assert_eq!(response.status(), StatusCode::OK, "{query}");
+  }
+  for query in ["completed=bad", "completed=true&completed=false"] {
+    let response = app
+      .clone()
+      .oneshot(get(&format!("/api/tasks?{query}")))
+      .await
+      .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{query}");
+  }
+}
+
+#[tokio::test]
 async fn create_then_list() {
   let app = app("create-list");
 
@@ -120,7 +166,8 @@ async fn create_then_list() {
   assert_eq!(resp.status(), StatusCode::CREATED);
   let created = body_json(resp).await;
   assert_eq!(created["id"], 1);
-  assert_eq!(created["priority"], "A");
+  assert!(created.get("priority").is_none());
+  assert!(created["raw"].as_str().unwrap().starts_with("(A) "));
   assert_eq!(created["projects"][0], "groceries");
 
   let resp = app
@@ -194,7 +241,8 @@ async fn complete_and_uncomplete() {
     .unwrap();
   let back = body_json(resp).await;
   assert_eq!(back["completed"], false);
-  assert_eq!(back["priority"], "B");
+  assert!(back.get("priority").is_none());
+  assert!(back["raw"].as_str().unwrap().starts_with("(B) "));
 }
 
 #[tokio::test]
