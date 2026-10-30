@@ -5,7 +5,7 @@ use crate::labelstore::{LabelStore, Labels};
 use crate::note::NoteStore;
 use crate::store::{Entry, Filter, Store, StoreError};
 use axum::extract::{OriginalUri, Path, Query, State};
-use axum::http::{header, StatusCode};
+use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -36,6 +36,21 @@ pub enum Change {
   Note,
 }
 
+/// Origin is advisory routing metadata, never authentication.
+#[derive(Debug, Clone)]
+pub struct Notification {
+  pub change: Change,
+  pub origin: Option<String>,
+}
+
+fn client_id(headers: &HeaderMap) -> Option<String> {
+  headers
+    .get("x-ntr-client-id")
+    .and_then(|value| value.to_str().ok())
+    .filter(|value| !value.is_empty() && value.len() <= 128)
+    .map(str::to_owned)
+}
+
 impl Change {
   fn as_str(self) -> &'static str {
     match self {
@@ -54,7 +69,7 @@ pub struct AppState {
   pub config: Arc<Config>,
   /// Sender half of the live-update channel. The watcher (the sole producer) calls
   /// [`AppState::notify`]; each SSE client connection subscribes a fresh receiver.
-  pub tx: broadcast::Sender<Change>,
+  pub tx: broadcast::Sender<Notification>,
 }
 
 impl AppState {
@@ -79,7 +94,11 @@ impl AppState {
   /// server's back. The two paths never double-fire for one change: an API write leaves
   /// disk == memory, so the watcher stays silent for it.
   pub fn notify(&self, change: Change) {
-    let _ = self.tx.send(change);
+    self.notify_from(change, None);
+  }
+
+  fn notify_from(&self, change: Change, origin: Option<String>) {
+    let _ = self.tx.send(Notification { change, origin });
   }
 }
 
@@ -222,12 +241,13 @@ async fn list_tasks(
 
 async fn create_task(
   State(state): State<AppState>,
+  headers: HeaderMap,
   Json(req): Json<TextRequest>,
 ) -> Result<(StatusCode, Json<TaskDto>), AppError> {
   let mut store = state.store.write().map_err(lock_err)?;
   let id = store.add(&req.text, state.config.add_creation_date, today())?;
   let dto = TaskDto::from_entry(store.get(id).expect("task was just added"));
-  state.notify(Change::Tasks);
+  state.notify_from(Change::Tasks, client_id(&headers));
   Ok((StatusCode::CREATED, Json(dto)))
 }
 
@@ -243,44 +263,48 @@ async fn get_task(
 async fn update_task(
   State(state): State<AppState>,
   Path(id): Path<u64>,
+  headers: HeaderMap,
   Json(req): Json<TextRequest>,
 ) -> Result<Json<TaskDto>, AppError> {
   let mut store = state.store.write().map_err(lock_err)?;
   store.update(id, &req.text)?;
   let dto = TaskDto::from_entry(store.get(id).expect("task exists"));
-  state.notify(Change::Tasks);
+  state.notify_from(Change::Tasks, client_id(&headers));
   Ok(Json(dto))
 }
 
 async fn complete_task(
   State(state): State<AppState>,
   Path(id): Path<u64>,
+  headers: HeaderMap,
 ) -> Result<Json<TaskDto>, AppError> {
   let mut store = state.store.write().map_err(lock_err)?;
   store.complete(id, today())?;
   let dto = TaskDto::from_entry(store.get(id).expect("task exists"));
-  state.notify(Change::Tasks);
+  state.notify_from(Change::Tasks, client_id(&headers));
   Ok(Json(dto))
 }
 
 async fn uncomplete_task(
   State(state): State<AppState>,
   Path(id): Path<u64>,
+  headers: HeaderMap,
 ) -> Result<Json<TaskDto>, AppError> {
   let mut store = state.store.write().map_err(lock_err)?;
   store.uncomplete(id)?;
   let dto = TaskDto::from_entry(store.get(id).expect("task exists"));
-  state.notify(Change::Tasks);
+  state.notify_from(Change::Tasks, client_id(&headers));
   Ok(Json(dto))
 }
 
 async fn delete_task(
   State(state): State<AppState>,
   Path(id): Path<u64>,
+  headers: HeaderMap,
 ) -> Result<StatusCode, AppError> {
   let mut store = state.store.write().map_err(lock_err)?;
   store.delete(id)?;
-  state.notify(Change::Tasks);
+  state.notify_from(Change::Tasks, client_id(&headers));
   Ok(StatusCode::NO_CONTENT)
 }
 
@@ -290,10 +314,14 @@ async fn get_raw(State(state): State<AppState>) -> Result<Response, AppError> {
   Ok(([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], body).into_response())
 }
 
-async fn put_raw(State(state): State<AppState>, body: String) -> Result<StatusCode, AppError> {
+async fn put_raw(
+  State(state): State<AppState>,
+  headers: HeaderMap,
+  body: String,
+) -> Result<StatusCode, AppError> {
   let mut store = state.store.write().map_err(lock_err)?;
   store.replace_raw(&body)?;
-  state.notify(Change::Tasks);
+  state.notify_from(Change::Tasks, client_id(&headers));
   Ok(StatusCode::NO_CONTENT)
 }
 
@@ -303,10 +331,14 @@ async fn get_note(State(state): State<AppState>) -> Result<Response, AppError> {
   Ok((headers, note.content().to_string()).into_response())
 }
 
-async fn put_note(State(state): State<AppState>, body: String) -> Result<StatusCode, AppError> {
+async fn put_note(
+  State(state): State<AppState>,
+  headers: HeaderMap,
+  body: String,
+) -> Result<StatusCode, AppError> {
   let mut note = state.note.write().map_err(lock_err)?;
   note.replace(&body)?;
-  state.notify(Change::Note);
+  state.notify_from(Change::Note, client_id(&headers));
   Ok(StatusCode::NO_CONTENT)
 }
 
@@ -329,23 +361,44 @@ async fn put_labels(
 /// mutation or an out-of-band file edit (see [`AppState::notify`]). Clients re-fetch the
 /// named resource through the normal GET endpoints. A lagged subscriber (one that fell
 /// behind the buffer) skips the missed events and
-/// keeps streaming; it re-syncs on its next event or on reconnect.
+/// emits both resource tokens to recover lost changes, then resumes buffered events.
 async fn events(
   State(state): State<AppState>,
+  headers: HeaderMap,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
   let rx = state.tx.subscribe();
-  let stream = stream::unfold(rx, |mut rx| async move {
-    loop {
-      match rx.recv().await {
-        Ok(change) => {
-          let event = Event::default().event("change").data(change.as_str());
-          return Some((Ok(event), rx));
-        }
-        Err(broadcast::error::RecvError::Lagged(_)) => continue,
-        Err(broadcast::error::RecvError::Closed) => return None,
+  let origin = client_id(&headers);
+  let stream = stream::unfold(
+    (rx, origin, false),
+    |(mut rx, origin, rescan_note)| async move {
+      if rescan_note {
+        return Some((
+          Ok(Event::default().event("change").data("note")),
+          (rx, origin, false),
+        ));
       }
-    }
-  });
+      loop {
+        match rx.recv().await {
+          Ok(notification) => {
+            if origin.is_some() && notification.origin == origin {
+              continue;
+            }
+            let event = Event::default()
+              .event("change")
+              .data(notification.change.as_str());
+            return Some((Ok(event), (rx, origin, false)));
+          }
+          Err(broadcast::error::RecvError::Lagged(_)) => {
+            return Some((
+              Ok(Event::default().event("change").data("tasks")),
+              (rx, origin, true),
+            ));
+          }
+          Err(broadcast::error::RecvError::Closed) => return None,
+        }
+      }
+    },
+  );
   Sse::new(stream).keep_alive(KeepAlive::default())
 }
 

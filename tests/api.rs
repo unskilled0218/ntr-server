@@ -2,7 +2,8 @@
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use my_ntr_server::api::{router, AppState, Change};
+use futures_util::StreamExt;
+use my_ntr_server::api::{router, AppState, Change, Notification};
 use my_ntr_server::config::Config;
 use my_ntr_server::labelstore::LabelStore;
 use my_ntr_server::note::NoteStore;
@@ -396,7 +397,7 @@ async fn mutation_broadcasts_event() {
     .await
     .unwrap();
   assert!(
-    matches!(rx.try_recv(), Ok(Change::Tasks)),
+    matches!(rx.try_recv().map(|event| event.change), Ok(Change::Tasks)),
     "creating a task should broadcast Change::Tasks"
   );
 
@@ -405,7 +406,137 @@ async fn mutation_broadcasts_event() {
     .await
     .unwrap();
   assert!(
-    matches!(rx.try_recv(), Ok(Change::Note)),
+    matches!(rx.try_recv().map(|event| event.change), Ok(Change::Note)),
     "writing the note should broadcast Change::Note"
   );
+}
+
+fn origin(mut request: Request<Body>, id: &str) -> Request<Body> {
+  request
+    .headers_mut()
+    .insert("x-ntr-client-id", id.parse().unwrap());
+  request
+}
+
+async fn stream_token(
+  stream: &mut (impl futures_util::Stream<Item = Result<axum::body::Bytes, axum::Error>> + Unpin),
+  kind: &str,
+) {
+  let bytes = tokio::time::timeout(std::time::Duration::from_secs(1), stream.next())
+    .await
+    .unwrap()
+    .unwrap()
+    .unwrap();
+  let text = std::str::from_utf8(&bytes).unwrap();
+  assert!(text.contains("event: change"), "{text}");
+  assert!(text.contains(&format!("data: {kind}")), "{text}");
+}
+
+#[tokio::test]
+async fn every_mutation_attaches_origin_and_sse_filters_only_the_author() {
+  let (app, state) = app_with_state("origin");
+  let author = app
+    .clone()
+    .oneshot(origin(get("/api/events"), "author"))
+    .await
+    .unwrap();
+  let other = app
+    .clone()
+    .oneshot(origin(get("/api/events"), "other"))
+    .await
+    .unwrap();
+  let legacy = app.clone().oneshot(get("/api/events")).await.unwrap();
+  let mut author = author.into_body().into_data_stream();
+  let mut other = other.into_body().into_data_stream();
+  let mut legacy = legacy.into_body().into_data_stream();
+  let mut rx = state.tx.subscribe();
+  let created = app
+    .clone()
+    .oneshot(origin(
+      json_post("/api/tasks", serde_json::json!({"text": "one"})),
+      "author",
+    ))
+    .await
+    .unwrap();
+  let id = body_json(created).await["id"].as_u64().unwrap();
+  let mutations = [
+    put_json(
+      &format!("/api/tasks/{id}"),
+      serde_json::json!({"text": "two"}),
+    ),
+    json_post(&format!("/api/tasks/{id}/complete"), serde_json::json!({})),
+    json_post(
+      &format!("/api/tasks/{id}/uncomplete"),
+      serde_json::json!({}),
+    ),
+    Request::builder()
+      .method("DELETE")
+      .uri(format!("/api/tasks/{id}"))
+      .body(Body::empty())
+      .unwrap(),
+    put_text("/api/raw", "replacement\n"),
+    put_text("/api/note", "note"),
+  ];
+  for request in mutations {
+    assert!(app
+      .clone()
+      .oneshot(origin(request, "author"))
+      .await
+      .unwrap()
+      .status()
+      .is_success());
+  }
+  for kind in ["tasks", "tasks", "tasks", "tasks", "tasks", "tasks", "note"] {
+    assert_eq!(rx.try_recv().unwrap().origin.as_deref(), Some("author"));
+    stream_token(&mut other, kind).await;
+    stream_token(&mut legacy, kind).await;
+  }
+  // The author consumes all its own queued events but still receives watcher changes.
+  state.notify(Change::Note);
+  stream_token(&mut author, "note").await;
+  stream_token(&mut other, "note").await;
+  stream_token(&mut legacy, "note").await;
+  assert!(app
+    .clone()
+    .oneshot(put_text("/api/note", "no id"))
+    .await
+    .unwrap()
+    .status()
+    .is_success());
+  stream_token(&mut author, "note").await;
+  stream_token(&mut other, "note").await;
+  stream_token(&mut legacy, "note").await;
+}
+
+#[tokio::test]
+async fn lag_rescans_both_resources_even_when_all_retained_events_are_self_events() {
+  let (app, state) = app_with_state("lag-origin");
+  let subscriber = app
+    .clone()
+    .oneshot(origin(get("/api/events"), "self"))
+    .await
+    .unwrap();
+  let legacy = app.oneshot(get("/api/events")).await.unwrap();
+  let mut subscriber = subscriber.into_body().into_data_stream();
+  let mut legacy = legacy.into_body().into_data_stream();
+  // Receivers exist, but bodies have not been polled: overflow is deterministic.
+  for _ in 0..2 {
+    state.notify(Change::Tasks);
+    for _ in 0..40 {
+      state
+        .tx
+        .send(Notification {
+          change: Change::Note,
+          origin: Some("self".into()),
+        })
+        .unwrap();
+    }
+    stream_token(&mut subscriber, "tasks").await;
+    // The second rescan must survive another poll, without another event.
+    stream_token(&mut subscriber, "note").await;
+    stream_token(&mut legacy, "tasks").await;
+    stream_token(&mut legacy, "note").await;
+  }
+  state.notify(Change::Tasks);
+  stream_token(&mut subscriber, "tasks").await;
 }

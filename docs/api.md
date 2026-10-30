@@ -36,6 +36,8 @@ All task responses use this JSON shape:
 
 See [Task IDs](task-ids.md) for ID lifetime and [Live updates](live-updates.md) for event behavior.
 
+Task, raw-task, and note mutations accept an optional `X-Ntr-Client-Id` header. Supplying the same ID to `GET /api/events` filters only that subscriber's own mutation notifications. The header is advisory, not authentication. Watcher events and lag-triggered `tasks` / `note` rescans bypass origin filtering. Existing event names and string payloads remain compatible; updated clients detect and ask before applying changes.
+
 Priority is absent from task DTOs and stores. Any `priority` query parameter returns HTTP 400 with `{ "error": "Priority filtering is no longer supported" }`, including a bare key, empty, invalid, repeated, or URL-encoded key. Supported filters keep their existing validation. Older clients relying on priority are unsupported.
 
 `raw` preserves hidden leading legacy tokens; `description` excludes only that leading token and lifecycle dates. `pri:` tokens remain visible, editable description text. Complete/reopen never convert these tokens. New clients must validate raw completion state, dates, and description before reconstructing a hidden token during editing. See [todo.txt support and mixed-version limits](todo-txt.md).
