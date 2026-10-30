@@ -25,7 +25,6 @@ pub struct Entry {
 #[derive(Debug, Default)]
 pub struct Filter {
   pub completed: Option<bool>,
-  pub priority: Option<char>,
   pub project: Option<String>,
   pub context: Option<String>,
 }
@@ -76,11 +75,6 @@ impl Store {
       .filter(|e| {
         if let Some(c) = filter.completed {
           if e.task.completed != c {
-            return false;
-          }
-        }
-        if let Some(p) = filter.priority {
-          if e.task.priority != Some(p) {
             return false;
           }
         }
@@ -327,8 +321,53 @@ mod tests {
     let reloaded = Store::load(&path).unwrap();
     let all = reloaded.list(&Filter::default());
     assert_eq!(all.len(), 2);
-    assert_eq!(all[0].task.priority, Some('A'));
+    assert_eq!(all[0].task.legacy_prefix, Some('A'));
     assert!(all[1].task.completed);
+  }
+
+  #[test]
+  fn legacy_lines_survive_every_store_write_and_reload() {
+    let mut store = temp_store("legacy-writes");
+    let fixtures = [
+      "(A) 2026-06-01 call pri:A pri:B pri:A +work @phone due:2026-06-30 custom:yes",
+      "x (Z) 2026-06-19 2026-06-01 call pri:B pri:A",
+      "(A)call pri:A",
+      "(a) call",
+      "(AA) call",
+      "call (A)",
+    ];
+    store.replace_raw(&fixtures.join("\n")).unwrap();
+    let assert_disk = |store: &Store| {
+      let reloaded = Store::load(store.path.clone()).unwrap();
+      assert_eq!(reloaded.raw(), store.raw());
+      assert_eq!(fs::read_to_string(&store.path).unwrap(), store.raw());
+    };
+    let ids: Vec<_> = store
+      .list(&Filter::default())
+      .iter()
+      .map(|e| e.id)
+      .collect();
+    for (index, id) in ids.into_iter().enumerate() {
+      let original = store.get(id).unwrap().task.to_string();
+      store.update(id, &original).unwrap();
+      assert_disk(&store);
+      store.complete(id, today()).unwrap();
+      assert_disk(&store);
+      store.uncomplete(id).unwrap();
+      assert_disk(&store);
+      let expected = if index == 1 {
+        "(Z) 2026-06-01 call pri:B pri:A"
+      } else {
+        fixtures[index]
+      };
+      assert_eq!(store.get(id).unwrap().task.to_string(), expected);
+      let other = store.add("different task", false, today()).unwrap();
+      store.update(other, "unrelated edit").unwrap();
+      assert_disk(&store);
+      assert_eq!(store.get(id).unwrap().task.to_string(), expected);
+      store.delete(other).unwrap();
+      assert_disk(&store);
+    }
   }
 
   #[test]
@@ -363,7 +402,7 @@ mod tests {
     assert!(s.reload_from_disk().unwrap());
     let all = s.list(&Filter::default());
     assert_eq!(all.len(), 2);
-    assert_eq!(all[0].task.priority, Some('A'));
+    assert_eq!(all[0].task.legacy_prefix, Some('A'));
     // Re-reading the same content reports no change.
     assert!(!s.reload_from_disk().unwrap());
   }

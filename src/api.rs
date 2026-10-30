@@ -4,7 +4,7 @@ use crate::config::Config;
 use crate::labelstore::{LabelStore, Labels};
 use crate::note::NoteStore;
 use crate::store::{Entry, Filter, Store, StoreError};
-use axum::extract::{Path, Query, State};
+use axum::extract::{OriginalUri, Path, Query, State};
 use axum::http::{header, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
@@ -109,7 +109,6 @@ pub fn router(state: AppState) -> Router {
 struct TaskDto {
   id: u64,
   completed: bool,
-  priority: Option<char>,
   completion_date: Option<String>,
   creation_date: Option<String>,
   description: String,
@@ -125,7 +124,6 @@ impl TaskDto {
     TaskDto {
       id: e.id,
       completed: e.task.completed,
-      priority: e.task.priority,
       completion_date: e.task.completion_date.map(|x| x.to_string()),
       creation_date: e.task.creation_date.map(|x| x.to_string()),
       description: e.task.description.clone(),
@@ -147,7 +145,6 @@ struct TextRequest {
 #[derive(Debug, Deserialize)]
 struct ListQuery {
   completed: Option<bool>,
-  priority: Option<char>,
   project: Option<String>,
   context: Option<String>,
 }
@@ -197,12 +194,21 @@ async fn health() -> Json<serde_json::Value> {
 
 async fn list_tasks(
   State(state): State<AppState>,
-  Query(q): Query<ListQuery>,
+  OriginalUri(uri): OriginalUri,
+  Query(pairs): Query<Vec<(String, String)>>,
 ) -> Result<Json<Vec<TaskDto>>, AppError> {
+  if pairs.iter().any(|(key, _)| key == "priority") {
+    return Err(AppError::BadRequest(
+      "Priority filtering is no longer supported".into(),
+    ));
+  }
+  // Parse supported fields with the original typed query validation after checking removed keys.
+  let q = Query::<ListQuery>::try_from_uri(&uri)
+    .map_err(|err| AppError::BadRequest(err.to_string()))?
+    .0;
   let store = state.store.read().map_err(lock_err)?;
   let filter = Filter {
     completed: q.completed,
-    priority: q.priority,
     project: q.project,
     context: q.context,
   };

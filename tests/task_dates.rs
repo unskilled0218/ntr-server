@@ -127,7 +127,8 @@ async fn edit_dates_roundtrip_through_http_raw_storage_and_restart() {
   let (status, body) = request(&app, "POST", &format!("{path}/uncomplete"), None).await;
   assert_eq!(status, StatusCode::OK);
   let reopened: Value = serde_json::from_str(&body).unwrap();
-  assert_eq!(reopened["priority"], "A");
+  assert!(reopened.get("priority").is_none());
+  assert!(reopened["raw"].as_str().unwrap().starts_with("(A) "));
   assert_eq!(reopened["creation_date"], "2026-10-10");
   assert_eq!(reopened["tags"]["updated"], "2026-10-12");
   let (_, raw) = request(&app, "GET", "/api/raw", None).await;

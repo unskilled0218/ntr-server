@@ -194,10 +194,10 @@ class BashReleaseTests(unittest.TestCase):
   def test_consumer_settings_version_notes_and_runtime_contract(self):
     data = helper_module()
     config = data.settings(ROOT)
-    self.assertEqual(config["version"], "0.2.7")
+    self.assertEqual(config["version"], "0.2.8")
     self.assertEqual(config["repository"], "ntr/ntr-server")
     self.assertEqual(config["image"], "git.lan/ntr/ntr-server")
-    self.assertEqual(config["notes"], "docs/releases/0.2.7.md")
+    self.assertEqual(config["notes"], "docs/releases/0.2.8.md")
     self.assertFalse((ROOT / "scripts/image_release.py").exists())
     dockerfile = (ROOT / "Dockerfile").read_text()
     for token in ("cargo build --release --locked --bin my-ntr-server", "USER 1000:1000", "EXPOSE 8080", "/data/Note.md", "/data/todo.txt", "/data/labels.json"):
