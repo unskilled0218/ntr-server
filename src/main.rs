@@ -12,7 +12,7 @@ const WATCH_INTERVAL: Duration = Duration::from_secs(1);
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-  let config = Config::from_env();
+  let config = Config::load().map_err(|error| error.to_string())?;
   let state = api::AppState::from_config(config.clone())?;
 
   watch::spawn(state.clone(), WATCH_INTERVAL);

@@ -2,6 +2,7 @@
 
 - [Start](#start)
 - [Configuration](#configuration)
+- [Home Assistant dotenv override](#home-assistant-dotenv-override)
 - [Upgrade and rollback](#upgrade-and-rollback)
 
 Run commands from the server repository root. Compose selects `git.lan/ntr/ntr-server:latest`, a mutable shared amd64/arm64 image; Docker selects the host's architecture. No source mount or Rust compiler is needed. A separately approved first publication must establish this alias through the [image release workflow](image-release.md); local preparation is not publication. For reproducible deployments, replace it with a verified immutable index digest.
@@ -31,7 +32,7 @@ Tasks, notes, and remembered labels live in host `./data/todo.txt`, `./data/Note
 
 ## Configuration
 
-The Compose file uses fixed values with no shell-variable interpolation:
+The base Compose file uses fixed values with no shell-variable interpolation:
 
 - Image: `git.lan/ntr/ntr-server:latest` (mutable; pin a verified index digest for reproducibility).
 - Runtime UID/GID: `1000:1000`.
@@ -42,7 +43,18 @@ The Compose file uses fixed values with no shell-variable interpolation:
 
 For HA tasks, add the environment, token secret, read-only CA mount, and persistent metadata path shown in [HA container deployment](home-assistant.md#container-deployment). Notes and labels stay on the existing mount; the old task file is not migrated or modified.
 
-The Compose service has no `environment` section. Shell variables such as `NTR_IMAGE`, `NTR_BIND`, `NTR_PORT`, `NTR_UID`, `NTR_GID`, and `TODO_ADD_CREATION_DATE` do not change this configuration. The image itself still supports the [server environment settings](configuration.md) when run separately.
+The base Compose service has no `environment` or `env_file` section. Shell variables such as `NTR_IMAGE`, `NTR_BIND`, `NTR_PORT`, `NTR_UID`, `NTR_GID`, and `TODO_ADD_CREATION_DATE` do not change this base configuration. The image itself still supports the [server environment settings](configuration.md) when run separately.
+
+## Home Assistant dotenv override
+
+Copy `.env.example` to `.env` and edit it. Prepare `data/`, a protected token in `secrets/ha-token`, and your trust certificate in `certificates/homeassistant.lanCA.crt`, with permissions readable by container UID 1000. Select a verified image containing server 0.2.11 or later, then use:
+
+```sh
+docker compose -f docker-compose.yml -f docker-compose.ha.yml config --quiet
+docker compose -f docker-compose.yml -f docker-compose.ha.yml up -d
+```
+
+The tracked HA override injects `.env` through service `env_file` and mounts the private directories read-only. It does not alter the existing loopback port mapping or persistent data mount. Relative example paths resolve under the image's `/data` working directory. Compose's automatically loaded `.env` is normally only an interpolation source; it needs this explicit `env_file` wiring to reach the service. Explicit `environment` values in another override win over `env_file`. Run `config --quiet` to validate without printing settings. See [HA setup and path rules](home-assistant.md#container-deployment). No container is started during automated tests.
 
 ## Upgrade and rollback
 

@@ -10,17 +10,18 @@
 
 Clients connect to ntr server, not directly to HA. Configure one existing `todo.*` entity on the server. HA Local to-do is recommended. The adapter uses HA's standard `todo.get_items`, `todo.add_item`, `todo.update_item`, and `todo.remove_item` actions; due clearing uses `due_date: null` or `due_datetime: null`. The adapter targets these APIs as documented in HA 2026.11; validate your installed version on a disposable list before deploying.
 
-Create a long-lived access token in your HA profile's Security page. Store it in a file readable only by the server user. Do not commit it or include it in client settings. Supply your actual URL and entity; these are examples, not discovered deployment values.
+Create a long-lived access token in your HA profile's Security page. Store it in `secrets/ha-token`, readable only by the server user. Put your private CA trust certificate at `certificates/homeassistant.lanCA.crt`. Neither file is committed or sent to clients. Run from the server directory:
 
 ```sh
-TASK_BACKEND=homeassistant \
-HA_URL=https://homeassistant.lan:8123 \
-HA_TOKEN_FILE=/path/to/ha-token \
-HA_TODO_ENTITY=todo.personal_tasks \
-HA_CA_FILE=/path/to/homeassistant.lanCA.crt \
-HA_METADATA_FILE=/path/to/data/ha-metadata.json \
-cargo run
+cp .env.example .env
+mkdir -p secrets certificates
+chmod 700 secrets
+# Edit .env with your HA URL and entity; save the token and CA files before starting.
+chmod 600 secrets/ha-token
+cargo run --locked
 ```
+
+The example configures `TASK_BACKEND=homeassistant`, an example HTTPS URL/entity, token path `./secrets/ha-token`, CA path `./certificates/homeassistant.lanCA.crt`, metadata path `./ha-metadata.json`, and a 10-second poll interval. Replace example deployment values. Startup loads only the working directory's `.env`; existing process variables override it, so remove stale exports when switching to file configuration. Relative paths are resolved from that working directory. Restart after edits. `.env`, its local variants, and the private setup directories are Git-ignored, while `.env.example` stays tracked.
 
 `HA_CA_FILE` is optional with system-trusted certificates. For a private CA or self-signed certificate, supply its PEM trust certificate. Hostname verification remains enabled: the URL hostname must match the certificate. There is no insecure TLS option. Redirects, URL credentials, query parameters, and fragments are rejected. Individual HA requests time out after 10 seconds, keeping two-request reads below the client's 30-second deadline; response bodies are limited to 4 MiB.
 
@@ -30,27 +31,15 @@ Client-facing HA operations wait at most 5 seconds for the coordinator and run f
 
 ## Container deployment
 
-Add this override to the normal Compose service after selecting a verified image containing the adapter. Keep `./data` writable by container UID 1000. The secret file must be readable by that user; incompatible permissions fail rather than disabling authentication.
+Select a verified image containing version 0.2.11's configuration support; local code changes do not publish `latest`. Copy/edit `.env` and prepare the same `secrets/` and `certificates/` directories as above. Keep `./data` writable by container UID 1000. The token must be readable by that user; incompatible permissions fail rather than disabling authentication. The read-only mount source directories must already exist.
 
-```yaml
-services:
-  ntr-server:
-    environment:
-      TASK_BACKEND: homeassistant
-      HA_URL: https://homeassistant.lan:8123
-      HA_TODO_ENTITY: todo.personal_tasks
-      HA_TOKEN_FILE: /run/secrets/ha_token
-      HA_CA_FILE: /run/certificates/homeassistant.lanCA.crt
-      HA_METADATA_FILE: /data/ha-metadata.json
-      HA_POLL_SECONDS: "10"
-    secrets:
-      - ha_token
-    volumes:
-      - ./homeassistant.lanCA.crt:/run/certificates/homeassistant.lanCA.crt:ro
-secrets:
-  ha_token:
-    file: /path/outside/repository/ha-token
+```sh
+mkdir -p data secrets certificates
+docker compose -f docker-compose.yml -f docker-compose.ha.yml config --quiet
+docker compose -f docker-compose.yml -f docker-compose.ha.yml up -d
 ```
+
+The opt-in `docker-compose.ha.yml` uses service `env_file: .env`; Compose's normal interpolation-only `.env` loading does not itself pass settings to a container. The override mounts host `./secrets` and `./certificates` read-only at `/data/secrets` and `/data/certificates`. With the image working directory `/data`, the same example relative token/CA paths work in the container, and `./ha-metadata.json` is persisted on the existing `./data:/data` volume. The `.env` itself is not mounted or baked into the image. Explicit service `environment` settings in another override take precedence over `env_file`; image defaults such as `HOST=0.0.0.0` remain unless overridden. The base Compose command without this HA override is unchanged.
 
 The container must resolve the HA hostname and reach its HTTPS port. Back up the metadata sidecar with notes and labels; it owns stable client IDs and ntr-only lifecycle dates. Do not share a sidecar between server processes or point it at another HA instance/list. Source mismatches and malformed identity maps fail closed. Ntr still has no authentication: keep the loopback port mapping or use an authenticating reverse proxy.
 

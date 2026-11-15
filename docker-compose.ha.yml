@@ -1,0 +1,19 @@
+# Opt-in HA configuration: docker compose -f docker-compose.yml -f docker-compose.ha.yml up -d
+# The base service remains unchanged when this override is not selected.
+services:
+  ntr-server:
+    env_file:
+      - .env
+    volumes:
+      - type: bind
+        source: ./secrets
+        target: /data/secrets
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./certificates
+        target: /data/certificates
+        read_only: true
+        bind:
+          create_host_path: false

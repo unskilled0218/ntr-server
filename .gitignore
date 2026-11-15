@@ -4,6 +4,11 @@
 /todo.txt
 /ha-metadata.json
 /ha-metadata.json.tmp
+/.env
+/.env.*
+!/.env.example
+/secrets/
+/certificates/
 # Docker Compose runtime data (todo.txt + Note.md), but keep the bind-mount dir present.
 /data/*
 !/data/.gitkeep

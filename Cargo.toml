@@ -1,6 +1,6 @@
 [package]
 name = "my-ntr-server"
-version = "0.2.10"
+version = "0.2.11"
 edition = "2021"
 
 [lib]
@@ -22,6 +22,7 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 # when building the SSE live-update stream.
 futures-util = "0.3"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+dotenvy = "0.15"
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }

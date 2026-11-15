@@ -5,13 +5,15 @@
 
 A single-binary Rust HTTP server for tasks and a Markdown note. Uses plain files by default, or Home Assistant To-do for tasks, and sends live updates to connected clients.
 
-Version 0.2.10 adds the optional [Home Assistant task backend](docs/home-assistant.md), with server-only credentials and private-CA trust. Markdown notes stay file-backed. See [release notes](docs/releases/0.2.10.md); local preparation does not mean publication.
+Version 0.2.11 loads server settings from an optional working-directory `.env` file and adds an opt-in HA Compose override. See [configuration](docs/configuration.md), [HA setup](docs/home-assistant.md), and [release notes](docs/releases/0.2.11.md); local preparation does not mean publication.
 
 ## Quick start
 
 ```sh
 cargo run
 ```
+
+For Home Assistant tasks, copy `.env.example` to `.env`, edit it, and provide the token/certificate files described in [HA setup](docs/home-assistant.md#setup). Existing process variables override `.env`. Real `.env` files and private setup directories are Git-ignored.
 
 In another terminal:
 

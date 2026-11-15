@@ -1,6 +1,22 @@
 //! Server configuration, read from environment variables.
 
-use std::path::PathBuf;
+use std::collections::HashMap;
+use std::ffi::OsString;
+use std::path::{Path, PathBuf};
+
+/// Never display parser diagnostics: they can contain private file contents.
+#[derive(Debug)]
+pub struct ConfigLoadError;
+
+impl std::fmt::Display for ConfigLoadError {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    f.write_str(
+      "Could not load .env; check that it is a readable UTF-8 file with valid dotenv syntax",
+    )
+  }
+}
+
+impl std::error::Error for ConfigLoadError {}
 
 #[derive(Clone)]
 pub struct Config {
@@ -48,42 +64,74 @@ impl Default for Config {
 }
 
 impl Config {
+  /// Load only the working directory's optional .env without changing process variables.
+  pub fn load() -> Result<Self, ConfigLoadError> {
+    Self::from_env_file(Path::new(".env"), std::env::vars_os().collect())
+  }
+
+  fn from_env_file(
+    path: &Path,
+    mut environment: HashMap<OsString, OsString>,
+  ) -> Result<Self, ConfigLoadError> {
+    match dotenvy::from_path_iter(path) {
+      Ok(values) => {
+        for value in values {
+          let (key, value) = value.map_err(|_| ConfigLoadError)?;
+          environment
+            .entry(key.into())
+            .or_insert_with(|| value.into());
+        }
+      }
+      Err(dotenvy::Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {}
+      Err(_) => return Err(ConfigLoadError),
+    }
+    Ok(Self::from_lookup(|key| {
+      environment.get(std::ffi::OsStr::new(key)).cloned()
+    }))
+  }
+
   /// Build configuration from environment variables, falling back to defaults.
   pub fn from_env() -> Self {
+    Self::from_lookup(|key| std::env::var_os(key))
+  }
+
+  fn from_lookup(lookup: impl Fn(&str) -> Option<OsString>) -> Self {
+    let text = |key| lookup(key).and_then(|value| value.into_string().ok());
     let defaults = Config::default();
     Config {
-      file: std::env::var_os("TODO_FILE")
+      file: lookup("TODO_FILE")
         .map(PathBuf::from)
         .unwrap_or(defaults.file),
-      note_file: std::env::var_os("NOTE_FILE")
+      note_file: lookup("NOTE_FILE")
         .map(PathBuf::from)
         .unwrap_or(defaults.note_file),
-      labels_file: std::env::var_os("LABELS_FILE")
+      labels_file: lookup("LABELS_FILE")
         .map(PathBuf::from)
         .unwrap_or(defaults.labels_file),
-      host: std::env::var("HOST").unwrap_or(defaults.host),
-      port: std::env::var("PORT")
-        .ok()
+      host: text("HOST").unwrap_or(defaults.host),
+      port: text("PORT")
         .and_then(|p| p.parse().ok())
         .unwrap_or(defaults.port),
-      add_creation_date: std::env::var("TODO_ADD_CREATION_DATE")
-        .ok()
+      add_creation_date: text("TODO_ADD_CREATION_DATE")
         .map(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
         .unwrap_or(defaults.add_creation_date),
-      task_backend: std::env::var("TASK_BACKEND").unwrap_or(defaults.task_backend),
-      ha_url: std::env::var("HA_URL").unwrap_or_default(),
-      ha_token_file: std::env::var_os("HA_TOKEN_FILE")
+      task_backend: text("TASK_BACKEND").unwrap_or(defaults.task_backend),
+      ha_url: text("HA_URL").unwrap_or_default(),
+      ha_token_file: lookup("HA_TOKEN_FILE")
         .map(PathBuf::from)
         .unwrap_or_default(),
-      ha_todo_entity: std::env::var("HA_TODO_ENTITY").unwrap_or_default(),
-      ha_ca_file: std::env::var_os("HA_CA_FILE").map(PathBuf::from),
-      ha_metadata_file: std::env::var_os("HA_METADATA_FILE")
+      ha_todo_entity: text("HA_TODO_ENTITY").unwrap_or_default(),
+      ha_ca_file: lookup("HA_CA_FILE").map(PathBuf::from),
+      ha_metadata_file: lookup("HA_METADATA_FILE")
         .map(PathBuf::from)
         .unwrap_or(defaults.ha_metadata_file),
-      ha_poll_seconds: std::env::var("HA_POLL_SECONDS")
-        .ok()
+      ha_poll_seconds: text("HA_POLL_SECONDS")
         .map(|s| s.parse().unwrap_or(0))
         .unwrap_or(defaults.ha_poll_seconds),
     }
   }
 }
+
+#[cfg(test)]
+#[path = "config_tests.rs"]
+mod tests;
