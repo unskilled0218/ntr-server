@@ -40,6 +40,8 @@ The Compose file uses fixed values with no shell-variable interpolation:
 - Resource paths inherited from the image: `/data/todo.txt`, `/data/Note.md`, and `/data/labels.json`.
 - Creation-date behavior uses the server's default: `true`.
 
+For HA tasks, add the environment, token secret, read-only CA mount, and persistent metadata path shown in [HA container deployment](home-assistant.md#container-deployment). Notes and labels stay on the existing mount; the old task file is not migrated or modified.
+
 The Compose service has no `environment` section. Shell variables such as `NTR_IMAGE`, `NTR_BIND`, `NTR_PORT`, `NTR_UID`, `NTR_GID`, and `TODO_ADD_CREATION_DATE` do not change this configuration. The image itself still supports the [server environment settings](configuration.md) when run separately.
 
 ## Upgrade and rollback

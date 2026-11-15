@@ -5,6 +5,8 @@
 
 ## Application checks
 
+HA adapter tests require Python 3 and OpenSSL as well as Rust. They start generated-certificate loopback HTTPS fixtures without live HA writes. Use a writable temporary directory, such as `TMPDIR=/tmp/opencode` in the agent container.
+
 Run commands from the server repository root.
 
 ```sh

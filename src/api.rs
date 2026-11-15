@@ -4,13 +4,13 @@ use crate::config::Config;
 use crate::labelstore::{LabelStore, Labels};
 use crate::note::NoteStore;
 use crate::store::{Entry, Filter, Store, StoreError};
+use crate::task_backend::{Mutation, TaskBackend};
 use axum::extract::{OriginalUri, Path, Query, State};
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use chrono::{Local, NaiveDate};
 use futures_util::stream::{self, Stream};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -63,7 +63,7 @@ impl Change {
 /// Shared application state.
 #[derive(Clone)]
 pub struct AppState {
-  pub store: Arc<RwLock<Store>>,
+  pub store: TaskBackend,
   pub note: Arc<RwLock<NoteStore>>,
   pub labels: Arc<RwLock<LabelStore>>,
   pub config: Arc<Config>,
@@ -76,12 +76,23 @@ impl AppState {
   pub fn new(store: Store, note: NoteStore, labels: LabelStore, config: Config) -> Self {
     let (tx, _rx) = broadcast::channel(EVENT_CHANNEL_CAPACITY);
     AppState {
-      store: Arc::new(RwLock::new(store)),
+      store: TaskBackend::file(store),
       note: Arc::new(RwLock::new(note)),
       labels: Arc::new(RwLock::new(labels)),
       config: Arc::new(config),
       tx,
     }
+  }
+
+  pub fn from_config(config: Config) -> Result<Self, AppError> {
+    let (tx, _) = broadcast::channel(EVENT_CHANNEL_CAPACITY);
+    Ok(Self {
+      store: TaskBackend::from_config(&config, tx.clone())?,
+      note: Arc::new(RwLock::new(NoteStore::load(&config.note_file)?)),
+      labels: Arc::new(RwLock::new(LabelStore::load(&config.labels_file)?)),
+      config: Arc::new(config),
+      tx,
+    })
   }
 
   /// Announce a change to every connected live client. A send with no subscribers is
@@ -106,6 +117,7 @@ impl AppState {
 pub fn router(state: AppState) -> Router {
   Router::new()
     .route("/api/health", get(health))
+    .route("/api/capabilities", get(capabilities))
     .route("/api/tasks", get(list_tasks).post(create_task))
     .route(
       "/api/tasks/{id}",
@@ -174,6 +186,10 @@ pub enum AppError {
   NotFound,
   BadRequest(String),
   Internal(String),
+  Upstream(String),
+  Unavailable(String),
+  Conflict(String),
+  Timeout,
 }
 
 impl IntoResponse for AppError {
@@ -182,6 +198,13 @@ impl IntoResponse for AppError {
       AppError::NotFound => (StatusCode::NOT_FOUND, "not found".to_string()),
       AppError::BadRequest(m) => (StatusCode::BAD_REQUEST, m),
       AppError::Internal(m) => (StatusCode::INTERNAL_SERVER_ERROR, m),
+      AppError::Upstream(m) => (StatusCode::BAD_GATEWAY, m),
+      AppError::Unavailable(m) => (StatusCode::SERVICE_UNAVAILABLE, m),
+      AppError::Conflict(m) => (StatusCode::CONFLICT, m),
+      AppError::Timeout => (
+        StatusCode::GATEWAY_TIMEOUT,
+        "Home Assistant timed out; a write may have committed. Reload before retrying.".into(),
+      ),
     };
     (status, Json(json!({ "error": message }))).into_response()
   }
@@ -203,12 +226,21 @@ impl From<io::Error> for AppError {
   }
 }
 
-fn today() -> NaiveDate {
-  Local::now().date_naive()
+impl std::fmt::Display for AppError {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    write!(f, "{self:?}")
+  }
 }
+impl std::error::Error for AppError {}
 
 async fn health() -> Json<serde_json::Value> {
   Json(json!({ "status": "ok" }))
+}
+
+async fn capabilities(State(state): State<AppState>) -> Json<serde_json::Value> {
+  Json(
+    json!({ "task_backend": if state.store.is_ha() { "homeassistant" } else { "file" }, "raw_task_replace": !state.store.is_ha() }),
+  )
 }
 
 async fn list_tasks(
@@ -225,16 +257,17 @@ async fn list_tasks(
   let q = Query::<ListQuery>::try_from_uri(&uri)
     .map_err(|err| AppError::BadRequest(err.to_string()))?
     .0;
-  let store = state.store.read().map_err(lock_err)?;
   let filter = Filter {
     completed: q.completed,
     project: q.project,
     context: q.context,
   };
-  let tasks = store
+  let tasks = state
+    .store
     .list(&filter)
+    .await?
     .into_iter()
-    .map(TaskDto::from_entry)
+    .map(|e| TaskDto::from_entry(&e))
     .collect();
   Ok(Json(tasks))
 }
@@ -244,10 +277,17 @@ async fn create_task(
   headers: HeaderMap,
   Json(req): Json<TextRequest>,
 ) -> Result<(StatusCode, Json<TaskDto>), AppError> {
-  let mut store = state.store.write().map_err(lock_err)?;
-  let id = store.add(&req.text, state.config.add_creation_date, today())?;
-  let dto = TaskDto::from_entry(store.get(id).expect("task was just added"));
-  state.notify_from(Change::Tasks, client_id(&headers));
+  let entry = state
+    .store
+    .mutate(
+      Mutation::Create(req.text),
+      &state.config,
+      &state.tx,
+      client_id(&headers),
+    )
+    .await?
+    .ok_or_else(|| AppError::Internal("Missing created task".into()))?;
+  let dto = TaskDto::from_entry(&entry);
   Ok((StatusCode::CREATED, Json(dto)))
 }
 
@@ -255,9 +295,8 @@ async fn get_task(
   State(state): State<AppState>,
   Path(id): Path<u64>,
 ) -> Result<Json<TaskDto>, AppError> {
-  let store = state.store.read().map_err(lock_err)?;
-  let entry = store.get(id).ok_or(AppError::NotFound)?;
-  Ok(Json(TaskDto::from_entry(entry)))
+  let entry = state.store.get(id).await?;
+  Ok(Json(TaskDto::from_entry(&entry)))
 }
 
 async fn update_task(
@@ -266,10 +305,17 @@ async fn update_task(
   headers: HeaderMap,
   Json(req): Json<TextRequest>,
 ) -> Result<Json<TaskDto>, AppError> {
-  let mut store = state.store.write().map_err(lock_err)?;
-  store.update(id, &req.text)?;
-  let dto = TaskDto::from_entry(store.get(id).expect("task exists"));
-  state.notify_from(Change::Tasks, client_id(&headers));
+  let entry = state
+    .store
+    .mutate(
+      Mutation::Update(id, req.text),
+      &state.config,
+      &state.tx,
+      client_id(&headers),
+    )
+    .await?
+    .ok_or(AppError::NotFound)?;
+  let dto = TaskDto::from_entry(&entry);
   Ok(Json(dto))
 }
 
@@ -278,10 +324,17 @@ async fn complete_task(
   Path(id): Path<u64>,
   headers: HeaderMap,
 ) -> Result<Json<TaskDto>, AppError> {
-  let mut store = state.store.write().map_err(lock_err)?;
-  store.complete(id, today())?;
-  let dto = TaskDto::from_entry(store.get(id).expect("task exists"));
-  state.notify_from(Change::Tasks, client_id(&headers));
+  let entry = state
+    .store
+    .mutate(
+      Mutation::Complete(id),
+      &state.config,
+      &state.tx,
+      client_id(&headers),
+    )
+    .await?
+    .ok_or(AppError::NotFound)?;
+  let dto = TaskDto::from_entry(&entry);
   Ok(Json(dto))
 }
 
@@ -290,10 +343,17 @@ async fn uncomplete_task(
   Path(id): Path<u64>,
   headers: HeaderMap,
 ) -> Result<Json<TaskDto>, AppError> {
-  let mut store = state.store.write().map_err(lock_err)?;
-  store.uncomplete(id)?;
-  let dto = TaskDto::from_entry(store.get(id).expect("task exists"));
-  state.notify_from(Change::Tasks, client_id(&headers));
+  let entry = state
+    .store
+    .mutate(
+      Mutation::Reopen(id),
+      &state.config,
+      &state.tx,
+      client_id(&headers),
+    )
+    .await?
+    .ok_or(AppError::NotFound)?;
+  let dto = TaskDto::from_entry(&entry);
   Ok(Json(dto))
 }
 
@@ -302,15 +362,20 @@ async fn delete_task(
   Path(id): Path<u64>,
   headers: HeaderMap,
 ) -> Result<StatusCode, AppError> {
-  let mut store = state.store.write().map_err(lock_err)?;
-  store.delete(id)?;
-  state.notify_from(Change::Tasks, client_id(&headers));
+  state
+    .store
+    .mutate(
+      Mutation::Delete(id),
+      &state.config,
+      &state.tx,
+      client_id(&headers),
+    )
+    .await?;
   Ok(StatusCode::NO_CONTENT)
 }
 
 async fn get_raw(State(state): State<AppState>) -> Result<Response, AppError> {
-  let store = state.store.read().map_err(lock_err)?;
-  let body = store.raw();
+  let body = state.store.raw().await?;
   Ok(([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], body).into_response())
 }
 
@@ -319,8 +384,7 @@ async fn put_raw(
   headers: HeaderMap,
   body: String,
 ) -> Result<StatusCode, AppError> {
-  let mut store = state.store.write().map_err(lock_err)?;
-  store.replace_raw(&body)?;
+  state.store.replace_raw(&body)?;
   state.notify_from(Change::Tasks, client_id(&headers));
   Ok(StatusCode::NO_CONTENT)
 }

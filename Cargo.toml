@@ -1,6 +1,6 @@
 [package]
 name = "my-ntr-server"
-version = "0.2.9"
+version = "0.2.10"
 edition = "2021"
 
 [lib]
@@ -21,6 +21,8 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 # Already pulled in transitively by axum; surfaced for direct use of stream::unfold
 # when building the SSE live-update stream.
 futures-util = "0.3"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }
+tokio = { version = "1", features = ["test-util"] }

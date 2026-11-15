@@ -13,6 +13,7 @@
 use crate::api::{AppState, Change};
 use crate::note::NoteStore;
 use crate::store::Store;
+use crate::task_backend::TaskBackend;
 use std::io;
 use std::sync::RwLock;
 use std::time::Duration;
@@ -41,18 +42,33 @@ impl ReloadFromDisk for NoteStore {
 /// actually changed) and announces the ones that did. A poisoned lock or an I/O error is
 /// logged and skipped; the next tick retries.
 pub fn spawn(state: AppState, interval: Duration) {
+  let file_state = state.clone();
   tokio::spawn(async move {
     let mut ticker = tokio::time::interval(interval);
     loop {
       ticker.tick().await;
-      reload_and_notify(&state);
+      reload_and_notify(&file_state);
     }
   });
+  if let TaskBackend::HomeAssistant(store) = state.store.clone() {
+    let seconds = state.config.ha_poll_seconds;
+    tokio::spawn(async move {
+      let mut ticker = tokio::time::interval(Duration::from_secs(seconds));
+      loop {
+        ticker.tick().await;
+        if store.lock().await.poll().await.is_err() {
+          eprintln!("watch: HA refresh failed; retrying on next poll");
+        }
+      }
+    });
+  }
 }
 
 /// One poll pass: reload the store and the note, announcing each that changed.
 fn reload_and_notify(state: &AppState) {
-  poll(&state.store, state, Change::Tasks, "tasks");
+  if let TaskBackend::File(store) = &state.store {
+    poll(store, state, Change::Tasks, "tasks");
+  }
   poll(&state.note, state, Change::Note, "note");
 }
 

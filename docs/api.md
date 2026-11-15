@@ -19,6 +19,7 @@ All task responses use this JSON shape:
 | Method & path | Description |
 | --- | --- |
 | `GET /api/health` | Liveness check. |
+| `GET /api/capabilities` | Non-secret `task_backend` (`file`/`homeassistant`) and `raw_task_replace` boolean. |
 | `GET /api/tasks` | List tasks. Filters: `completed`, `project`, `context`. |
 | `POST /api/tasks` | Create from `{ "text": "<todo.txt line>" }`. |
 | `GET /api/tasks/{id}` | Fetch one task. |
@@ -35,6 +36,10 @@ All task responses use this JSON shape:
 | `GET /api/events` | Server-Sent Events stream of `change` events (`tasks` / `note`) for live updates. |
 
 See [Task IDs](task-ids.md) for ID lifetime and [Live updates](live-updates.md) for event behavior.
+
+In HA mode, CRUD targets one configured list using stable UID-backed IDs. `/api/raw` exports task text; replacing it returns 400 before HA writes. Unknown external completion dates project both lifecycle dates as null without erasing private creation history. Native due values can be dates or offset-bearing datetimes. See [HA mapping](home-assistant.md).
+
+HA failures use 502/503, timeouts use 504, and uncertain writes use 409 (or 504 for timed-out actions). Upstream writes can commit before readback/metadata failure; reload before another mutation instead of replaying automatically. Error responses omit tokens and upstream bodies. `/api/health` attests process liveness, not HA availability.
 
 Task, raw-task, and note mutations accept an optional `X-Ntr-Client-Id` header. Supplying the same ID to `GET /api/events` filters only that subscriber's own mutation notifications. The header is advisory, not authentication. Watcher events and lag-triggered `tasks` / `note` rescans bypass origin filtering. Existing event names and string payloads remain compatible; updated clients detect and ask before applying changes.
 

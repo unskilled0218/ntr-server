@@ -2,6 +2,8 @@
 /.claude
 /Note.md
 /todo.txt
+/ha-metadata.json
+/ha-metadata.json.tmp
 # Docker Compose runtime data (todo.txt + Note.md), but keep the bind-mount dir present.
 /data/*
 !/data/.gitkeep
