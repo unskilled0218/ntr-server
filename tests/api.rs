@@ -107,6 +107,33 @@ async fn health_ok() {
 }
 
 #[tokio::test]
+async fn legacy_and_list_filters_select_the_same_tasks_without_changing_wire_keys() {
+  let app = app("list-compatibility");
+  let response = app
+    .clone()
+    .oneshot(put_text(
+      "/api/raw",
+      "project planning +my-project\nother task +other\n",
+    ))
+    .await
+    .unwrap();
+  assert_eq!(response.status(), StatusCode::NO_CONTENT);
+  for query in ["project=my-project", "list=my-project"] {
+    let response = app
+      .clone()
+      .oneshot(get(&format!("/api/tasks?{query}")))
+      .await
+      .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let tasks = body_json(response).await;
+    assert_eq!(tasks.as_array().unwrap().len(), 1);
+    assert_eq!(tasks[0]["raw"], "project planning +my-project");
+    assert_eq!(tasks[0]["projects"], serde_json::json!(["my-project"]));
+    assert!(tasks[0].get("lists").is_none());
+  }
+}
+
+#[tokio::test]
 async fn rejects_every_priority_query_before_supported_filter_validation() {
   let app = app("removed-filter");
   for query in [
@@ -117,7 +144,7 @@ async fn rejects_every_priority_query_before_supported_filter_validation() {
     "priority=A&priority=B",
     "%70riority=A",
     "completed=bad&priority=",
-    "project=work&context=phone&priority=A",
+    "list=work&context=phone&priority=A",
   ] {
     let response = app
       .clone()
@@ -132,7 +159,7 @@ async fn rejects_every_priority_query_before_supported_filter_validation() {
   }
   for query in [
     "completed=false",
-    "project=work&context=phone",
+    "list=work&context=phone",
     "unknown=value",
   ] {
     let response = app

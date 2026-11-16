@@ -3,7 +3,7 @@
 - [Setup](#setup)
 - [Container deployment](#container-deployment)
 - [Task mapping](#task-mapping)
-- [Lists and projects](#lists-and-projects)
+- [Lists](#lists)
 - [Move recovery](#move-recovery)
 - [Metadata durability](#metadata-durability)
 - [Safety and compatibility](#safety-and-compatibility)
@@ -37,9 +37,11 @@ HA owns list entity/item UID, summary, status, native due, and description. The 
 
 Unknown external completion dates expose unknown lifecycle dates; retained private creation history returns on reopen. Restart/outages/external transitions can invalidate completion continuity. This is not an audit log. Datetime edits retain time/fixed offset; HA may normalize an equivalent instant. Clear removes the whole deadline, not only its date.
 
-## Lists and projects
+<a id="lists-and-projects"></a>
 
-All visible lists appear as projects, including empty lists. Entity IDs define identity; duplicate names remain distinct. Unselected creates use the configured default, and updates without routing preserve the current list. A failed/unavailable visible list blocks the whole snapshot rather than appearing empty. Removed entities leave identity tombstones.
+## Lists
+
+All visible HA lists appear in selectors, including empty lists. Entity IDs define identity; duplicate names remain distinct. Unselected creates use the configured default, and updates without routing preserve the current list. A failed/unavailable visible list blocks the whole snapshot rather than appearing empty. Removed entities leave identity tombstones.
 
 Administration defaults off. Enable `HA_MANAGE_LISTS=true` only with an HA admin token and trusted ntr access or an authenticating proxy. It exposes administrative privileges through an otherwise unauthenticated API. Other tokens/providers retain supported task operations without destructive capabilities.
 

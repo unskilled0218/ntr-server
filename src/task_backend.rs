@@ -81,10 +81,10 @@ impl TaskBackend {
         .filter(|e| {
           let d = e.task.derived();
           filter.completed.is_none_or(|c| c == e.task.completed)
-            && filter.project.as_ref().is_none_or(|p| {
+            && filter.list.as_ref().is_none_or(|p| {
               e.list_id
                 .as_ref()
-                .map_or_else(|| d.projects.contains(p), |list| list == p)
+                .map_or_else(|| d.lists.contains(p), |list| list == p)
             })
             && filter
               .context

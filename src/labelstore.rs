@@ -6,7 +6,9 @@ use std::path::PathBuf;
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 pub struct Labels {
-  pub project: Vec<String>,
+  // Existing clients and labels.json keep their established key.
+  #[serde(rename = "project")]
+  pub list: Vec<String>,
   pub context: Vec<String>,
 }
 
@@ -59,10 +61,28 @@ mod tests {
   }
 
   #[test]
+  fn existing_labels_file_keeps_legacy_key_and_names_after_write() {
+    let path = temp_path("legacy-key");
+    fs::write(
+      &path,
+      r#"{"project":["work","my-project"],"context":["phone"]}"#,
+    )
+    .unwrap();
+    let mut store = LabelStore::load(&path).unwrap();
+    assert_eq!(store.get().list, vec!["work", "my-project"]);
+    store.replace(store.get()).unwrap();
+    let saved: serde_json::Value =
+      serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(saved["project"], serde_json::json!(["work", "my-project"]));
+    assert!(saved.get("list").is_none());
+    assert_eq!(LabelStore::load(path).unwrap().get(), store.get());
+  }
+
+  #[test]
   fn replace_then_get_round_trips() {
     let path = temp_path("roundtrip");
     let expected = Labels {
-      project: vec!["work".into()],
+      list: vec!["work".into()],
       context: vec!["phone".into()],
     };
     let mut store = LabelStore::load(&path).unwrap();

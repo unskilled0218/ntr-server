@@ -9,7 +9,7 @@ use std::fmt;
 /// A single todo.txt task.
 ///
 /// `description` holds the free-text remainder verbatim (including any
-/// `+project`, `@context`, and `key:value` tokens), so it stays the
+/// `+list`, `@context`, and `key:value` tokens), so it stays the
 /// authoritative source for those derived fields.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Task {
@@ -24,7 +24,7 @@ pub struct Task {
 /// Fields derived from a task's description, parsed in a single pass.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Derived {
-  pub projects: Vec<String>,
+  pub lists: Vec<String>,
   pub contexts: Vec<String>,
   pub tags: BTreeMap<String, String>,
 }
@@ -75,13 +75,13 @@ impl Task {
     })
   }
 
-  /// Parse projects, contexts, and key/value tags from the description in one pass.
+  /// Parse lists, contexts, and key/value tags from the description in one pass.
   pub fn derived(&self) -> Derived {
     let mut d = Derived::default();
     for tok in self.description.split_whitespace() {
       if let Some(p) = tok.strip_prefix('+') {
-        if !p.is_empty() && !d.projects.iter().any(|x| x == p) {
-          d.projects.push(p.to_string());
+        if !p.is_empty() && !d.lists.iter().any(|x| x == p) {
+          d.lists.push(p.to_string());
         }
       } else if let Some(c) = tok.strip_prefix('@') {
         if !c.is_empty() && !d.contexts.iter().any(|x| x == c) {
@@ -218,10 +218,10 @@ mod tests {
   }
 
   #[test]
-  fn derives_projects_contexts_tags() {
+  fn derives_lists_contexts_tags() {
     let t = Task::parse("call +work @office due:2026-06-30 +work").unwrap();
     let d = t.derived();
-    assert_eq!(d.projects, vec!["work"]);
+    assert_eq!(d.lists, vec!["work"]);
     assert_eq!(d.contexts, vec!["office"]);
     assert_eq!(d.tags.get("due").map(String::as_str), Some("2026-06-30"));
   }

@@ -151,7 +151,9 @@ struct TaskDto {
   completion_date: Option<String>,
   creation_date: Option<String>,
   description: String,
-  projects: Vec<String>,
+  // Keep the established HTTP field; domain code uses lists.
+  #[serde(rename = "projects")]
+  lists: Vec<String>,
   contexts: Vec<String>,
   tags: BTreeMap<String, String>,
   raw: String,
@@ -167,11 +169,11 @@ impl TaskDto {
       completion_date: e.task.completion_date.map(|x| x.to_string()),
       creation_date: e.task.creation_date.map(|x| x.to_string()),
       description: e.task.description.clone(),
-      projects: e
+      lists: e
         .list_id
         .as_ref()
         .map(|list| vec![list.clone()])
-        .unwrap_or(d.projects),
+        .unwrap_or(d.lists),
       contexts: d.contexts,
       tags: d.tags,
       raw: e.task.to_string(),
@@ -191,7 +193,8 @@ struct TextRequest {
 #[derive(Debug, Deserialize)]
 struct ListQuery {
   completed: Option<bool>,
-  project: Option<String>,
+  #[serde(alias = "project")]
+  list: Option<String>,
   context: Option<String>,
 }
 
@@ -354,7 +357,7 @@ async fn list_tasks(
     .0;
   let filter = Filter {
     completed: q.completed,
-    project: q.project,
+    list: q.list,
     context: q.context,
   };
   let tasks = state

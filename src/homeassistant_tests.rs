@@ -191,7 +191,7 @@ async fn crud_duplicate_summaries_due_descriptions_and_ids_survive_restart() {
     .unwrap();
   assert_ne!(created.id, external_id);
   assert_eq!(created.task.derived().tags["due"], "2026-11-16");
-  assert!(created.task.derived().projects.contains(&"work".into()));
+  assert!(created.task.derived().lists.contains(&"work".into()));
   let uid = f.state().await["items"]
     .as_array()
     .unwrap()
@@ -639,7 +639,7 @@ async fn capabilities_raw_safety_note_labels_and_filters_use_real_router() {
     ("GET", "/api/note", "", StatusCode::OK),
     (
       "GET",
-      "/api/tasks?project=todo.fixture&context=home",
+      "/api/tasks?list=todo.fixture&context=home",
       "",
       StatusCode::OK,
     ),

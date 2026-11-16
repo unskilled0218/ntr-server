@@ -5,7 +5,7 @@
 
 A Rust HTTP server for tasks, Markdown notes, and live change notifications. Tasks can use local storage or Home Assistant.
 
-Version 0.2.15. See [release notes](docs/releases/0.2.15.md).
+Version 0.2.16. See [release notes](docs/releases/0.2.16.md).
 
 ## Quick start
 

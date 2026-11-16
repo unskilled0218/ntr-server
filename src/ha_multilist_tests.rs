@@ -309,7 +309,7 @@ async fn lists_qualify_duplicate_uids_and_preserve_global_ids_across_restart() {
   assert_eq!(
     catalog["lists"].as_array().unwrap().len(),
     3,
-    "empty lists are projects too"
+    "empty lists are lists too"
   );
   assert_eq!(
     catalog["can_create"], false,

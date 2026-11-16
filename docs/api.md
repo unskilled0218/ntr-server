@@ -7,7 +7,7 @@
 
 ## Task responses
 
-Tasks include `id`, completion/creation dates, `description`, `projects`, `contexts`, `tags`, and `raw`. For example:
+Tasks include `id`, completion/creation dates, `description`, `projects` (list membership), `contexts`, `tags`, and `raw`. The legacy HTTP field remains `projects` for existing clients; domain code uses `lists`. For example:
 
 ```json
 {
@@ -23,7 +23,7 @@ Tasks include `id`, completion/creation dates, `description`, `projects`, `conte
 }
 ```
 
-HA tasks also include `list_id`, and `projects` becomes `[list_id]`. Treat `raw` as a validated task projection, not a complete HA backup. See [ID lifetime](task-ids.md).
+HA tasks also include `list_id`, and `projects` becomes `[list_id]`. Labels JSON and `labels.json` retain `{ "project": [...], "context": [...] }`; the domain field is `list`. No task text or stored labels are migrated. Treat `raw` as a validated task projection, not a complete HA backup. See [ID lifetime](task-ids.md).
 
 ## Routes
 
@@ -31,7 +31,7 @@ HA tasks also include `list_id`, and `projects` becomes `[list_id]`. Treat `raw`
 | --- | --- |
 | `GET /api/health` | Process liveness, not upstream health. |
 | `GET /api/capabilities` | `task_backend` (`file`/`homeassistant`) and `raw_task_replace`. |
-| `GET /api/tasks` | List; optional `completed`, `project`, `context` filters. |
+| `GET /api/tasks` | List; optional `completed`, `project` (legacy list filter), `context` filters; `list` is also accepted. |
 | `POST /api/tasks` | Create from `{ "text": "buy milk" }`. |
 | `GET /api/tasks/{id}` | Fetch one task. |
 | `PUT /api/tasks/{id}` | Replace from a `text` request. |
@@ -51,7 +51,7 @@ HA tasks also include `list_id`, and `projects` becomes `[list_id]`. Treat `raw`
 
 ## HA list routing
 
-Create/update accept optional `list_id`: omission uses the default for creates or preserves the update's source; empty selects the default. A changed list additionally requires `confirm_move: true`, current `expected_source`, and fresh `expected_raw`. Summary-label edits never imply moves. The `project` filter uses the list ID. Other backends reject explicit HA routing/list operations.
+Create/update accept optional `list_id`: omission uses the default for creates or preserves the update's source; empty selects the default. A changed list additionally requires `confirm_move: true`, current `expected_source`, and fresh `expected_raw`. Summary-label edits never imply moves. The `project`/`list` filter uses the list ID. Other backends reject explicit HA routing/list operations.
 
 Catalog entries expose `id`, `name`, `is_default`, `can_rename`, and `can_delete`; the response adds `can_create` and nullable `pending_move`. Diagnostics expose operation/task/source/target IDs and whether the copy is identified, never private registry data. Echo the current operation ID during recovery; stale confirmations fail. Pending moves block both participant lists. See [management/recovery requirements](home-assistant.md#lists-and-projects).
 

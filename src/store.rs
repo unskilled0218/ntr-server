@@ -26,7 +26,7 @@ pub struct Entry {
 #[derive(Debug, Default)]
 pub struct Filter {
   pub completed: Option<bool>,
-  pub project: Option<String>,
+  pub list: Option<String>,
   pub context: Option<String>,
 }
 
@@ -79,10 +79,10 @@ impl Store {
             return false;
           }
         }
-        if filter.project.is_some() || filter.context.is_some() {
+        if filter.list.is_some() || filter.context.is_some() {
           let d = e.task.derived();
-          if let Some(pr) = &filter.project {
-            if !d.projects.iter().any(|x| x == pr) {
+          if let Some(pr) = &filter.list {
+            if !d.lists.iter().any(|x| x == pr) {
               return false;
             }
           }
@@ -279,7 +279,7 @@ mod tests {
   }
 
   #[test]
-  fn filter_by_project_and_completion() {
+  fn filter_by_list_and_completion() {
     let mut s = temp_store("filter");
     s.add("a +home", true, today()).unwrap();
     s.add("b +work", true, today()).unwrap();
@@ -287,13 +287,13 @@ mod tests {
     s.complete(id, today()).unwrap();
 
     let home = Filter {
-      project: Some("home".to_string()),
+      list: Some("home".to_string()),
       ..Filter::default()
     };
     assert_eq!(s.list(&home).len(), 2);
 
     let active_home = Filter {
-      project: Some("home".to_string()),
+      list: Some("home".to_string()),
       completed: Some(false),
       ..Filter::default()
     };
