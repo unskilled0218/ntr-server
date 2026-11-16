@@ -4,10 +4,24 @@ services:
   ntr-server:
     image: git.lan/ntr/ntr-server:latest
     user: "1000:1000"
+    env_file:
+      - .env
     ports:
       - "127.0.0.1:8080:8080"
     volumes:
       - ./data:/data
+      - type: bind
+        source: ./secrets
+        target: /data/secrets
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./certificates
+        target: /data/certificates
+        read_only: true
+        bind:
+          create_host_path: false
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/api/health"]
       interval: 30s

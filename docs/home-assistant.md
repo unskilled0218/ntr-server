@@ -38,11 +38,11 @@ Select a verified image containing version 0.2.12's multi-list support; local co
 
 ```sh
 mkdir -p data secrets certificates
-docker compose -f docker-compose.yml -f docker-compose.ha.yml config --quiet
-docker compose -f docker-compose.yml -f docker-compose.ha.yml up -d
+docker compose config --quiet
+docker compose up -d
 ```
 
-The opt-in `docker-compose.ha.yml` uses service `env_file: .env`; Compose's normal interpolation-only `.env` loading does not itself pass settings to a container. The override mounts host `./secrets` and `./certificates` read-only at `/data/secrets` and `/data/certificates`. With the image working directory `/data`, the same example relative token/CA paths work in the container, and `./ha-metadata.json` is persisted on the existing `./data:/data` volume. The `.env` itself is not mounted or baked into the image. Explicit service `environment` settings in another override take precedence over `env_file`; image defaults such as `HOST=0.0.0.0` remain unless overridden. The base Compose command without this HA override is unchanged.
+The single `docker-compose.yml` uses service `env_file: .env`; Compose's normal interpolation-only `.env` loading does not itself pass settings to a container. It mounts host `./secrets` and `./certificates` read-only at `/data/secrets` and `/data/certificates`, without automatically creating missing source directories. With the image working directory `/data`, example relative token/CA paths work in the container, and `./ha-metadata.json` persists on `./data:/data`. The `.env` itself is not mounted or baked into the image. Explicit service `environment` settings in a custom override take precedence over `env_file`; image defaults such as `HOST=0.0.0.0` remain unless overridden. `.env` and both private directories are required for this Compose setup; for file-backed tasks use `TASK_BACKEND=file` and empty private directories.
 
 The container must resolve the HA hostname and reach its HTTPS/WSS port. Back up the metadata sidecar with notes and labels; it owns stable client IDs, ntr-only lifecycle dates, and pending move recovery. Do not share a sidecar between server processes or point it at another HA instance. Source mismatches and malformed identity maps fail closed. Ntr still has no authentication: keep the loopback port mapping or use an authenticating reverse proxy.
 

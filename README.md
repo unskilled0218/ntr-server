@@ -15,6 +15,8 @@ cargo run
 
 For Home Assistant tasks, copy `.env.example` to `.env`, edit it, and provide the token/certificate files described in [HA setup](docs/home-assistant.md#setup). Existing process variables override `.env`. Real `.env` files and private setup directories are Git-ignored.
 
+Docker uses one `docker-compose.yml` for both backends. Prepare `.env`, `data/`, `secrets/`, and `certificates/`, then run `docker compose up -d`; see [Compose setup](docs/docker-compose.md).
+
 In another terminal:
 
 ```sh

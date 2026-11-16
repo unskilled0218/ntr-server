@@ -12,7 +12,7 @@ The multi-list fixture implements authenticated WSS registry commands and Local 
 
 Catalog notification tests inject one-shot empty-list rename/add/remove changes during an otherwise self-only write and check actual author SSE delivery, self-only filtering, and silent later polls. On Unix, durable-write tests exercise write/file-sync/rename/directory-sync ordering and failures without changing global working directories or permissions. Private per-store persistence injection covers post-rename failures at move intent, verified target, completion, reconcile, and abandon. These tests verify admission and restart behavior, not physical power-loss resilience; see [metadata durability](home-assistant.md#metadata-durability).
 
-Dotenv unit tests use explicit files/environment maps, and startup integration tests run the binary in isolated directories with child-only variables. Read-failure tests use a directory at `.env` rather than privilege-dependent permission bits. Run `python3 -B -m unittest discover -s tests -p 'test_env_compose.py' -v` for the HA override rendering check; it uses temporary example configuration without a daemon or container startup, and reports a skip when Compose is unavailable.
+Dotenv unit tests use explicit files/environment maps, and startup integration tests run the binary in isolated directories with child-only variables. Read-failure tests use a directory at `.env` rather than privilege-dependent permission bits. Run `python3 -B -m unittest discover -s tests -p 'test_env_compose.py' -v` for single-file HA/file-mode rendering and missing-dotenv checks; it uses temporary configuration without a daemon or container startup, and reports a skip when Compose is unavailable.
 
 Run commands from the server repository root.
 
