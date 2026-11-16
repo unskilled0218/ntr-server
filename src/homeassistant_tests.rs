@@ -412,6 +412,80 @@ async fn initiating_sse_subscriber_receives_concurrent_external_changes() {
 }
 
 #[tokio::test]
+async fn catalog_only_deltas_during_writes_reach_author_but_self_only_writes_stay_filtered() {
+  for change in [
+    json!({"names":{"todo.empty":"Renamed externally"}}),
+    json!({"lists":{"todo.empty":[],"todo.added":[]}}),
+    json!({"lists":{}}),
+    Value::Null,
+  ] {
+    let f = Fixture::new();
+    f.set(json!({"lists":{"todo.empty":[]}, "names":{"todo.empty":"Empty"}}))
+      .await;
+    let state = AppState::from_config(f.config.clone()).unwrap();
+    let crate::task_backend::TaskBackend::HomeAssistant(backend) = &state.store else {
+      unreachable!()
+    };
+    let backend = backend.clone();
+    backend.lock().await.poll().await.unwrap();
+    let mut notifications = state.tx.subscribe();
+    let app = api::router(state);
+    let events = app
+      .clone()
+      .oneshot(
+        Request::builder()
+          .uri("/api/events")
+          .header("x-ntr-client-id", "initiator")
+          .body(Body::empty())
+          .unwrap(),
+      )
+      .await
+      .unwrap();
+    let mut stream = events.into_body().into_data_stream();
+    f.set(json!({"catalog_on_write":change})).await;
+    let response = app
+      .oneshot(
+        Request::builder()
+          .method("POST")
+          .uri("/api/tasks")
+          .header("content-type", "application/json")
+          .header("x-ntr-client-id", "initiator")
+          .body(Body::from(r#"{"text":"Own task"}"#))
+          .unwrap(),
+      )
+      .await
+      .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let notification = notifications.try_recv().unwrap();
+    if change.is_null() {
+      assert_eq!(notification.origin.as_deref(), Some("initiator"));
+      assert!(
+        tokio::time::timeout(Duration::from_millis(50), stream.next())
+          .await
+          .is_err(),
+        "a proven self-only write is filtered for its author"
+      );
+    } else {
+      assert!(
+        notification.origin.is_none(),
+        "catalog delta must be unfiltered: {change}"
+      );
+      let event = tokio::time::timeout(Duration::from_secs(2), stream.next())
+        .await
+        .expect("author must receive catalog-only external change")
+        .unwrap()
+        .unwrap();
+      assert!(std::str::from_utf8(&event).unwrap().contains("tasks"));
+    }
+    backend.lock().await.poll().await.unwrap();
+    assert!(
+      notifications.try_recv().is_err(),
+      "unchanged polling must not repair or repeat events"
+    );
+  }
+}
+
+#[tokio::test]
 async fn poll_waits_for_inflight_mutation_without_consuming_external_delta() {
   let f = Fixture::new();
   f.set(json!({"items": [item("a", "A"), item("b", "B")], "mode":"pause_write", "on_write":[{"uid":"b","summary":"B external"}]})).await;

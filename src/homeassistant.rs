@@ -115,6 +115,7 @@ pub struct HaStore {
   token: String,
   tls: std::sync::Arc<rustls::ClientConfig>,
   path: PathBuf,
+  persist_metadata: fn(&std::path::Path, &str) -> std::io::Result<()>,
   metadata: Sidecar,
   baseline: Option<BTreeMap<String, Item>>,
   continuity: bool,
@@ -266,6 +267,7 @@ impl HaStore {
       token: token.trim().to_owned(),
       tls: std::sync::Arc::new(tls),
       path: config.ha_metadata_file.clone(),
+      persist_metadata: atomicfile::write_durable,
       metadata,
       baseline: None,
       continuity: false,
@@ -300,7 +302,7 @@ impl HaStore {
     // Also persists the schema-1 migration before admitting reads or writes.
     if migrating {
       let text = serde_json::to_string_pretty(&store.metadata).map_err(|_| metadata_error())?;
-      atomicfile::write(&store.path, &text).map_err(|_| metadata_error())?;
+      (store.persist_metadata)(&store.path, &text).map_err(|_| metadata_error())?;
     }
     Ok(store)
   }
@@ -432,7 +434,7 @@ impl HaStore {
 
   fn save(&mut self, next: Sidecar) -> Result<(), AppError> {
     let text = serde_json::to_string_pretty(&next).map_err(|_| metadata_error())?;
-    atomicfile::write(&self.path, &text).map_err(|_| metadata_error())?;
+    (self.persist_metadata)(&self.path, &text).map_err(|_| metadata_error())?;
     self.metadata = next;
     Ok(())
   }
@@ -900,7 +902,9 @@ impl HaStore {
       m.legacy = task.legacy_prefix;
       self.save(next)?;
     }
-    let own = if snapshots_match(&after, &expected) {
+    let own = if snapshots_match(&after, &expected)
+      && self.catalog_baseline.as_ref() == Some(&self.catalog)
+    {
       origin
     } else {
       None

@@ -5,6 +5,7 @@
 - [Task mapping](#task-mapping)
 - [Lists and projects](#lists-and-projects)
 - [Move recovery](#move-recovery)
+- [Metadata durability](#metadata-durability)
 - [Safety and compatibility](#safety-and-compatibility)
 - [Verification](#verification)
 
@@ -71,6 +72,14 @@ Choosing another list in Edit requires a separate confirmation. ntr checks the e
 
 Failures can leave both copies. ntr persists the journal and blocks writes to both involved lists, including after restart; an uncertain target UID never permits source deletion. Review both lists in HA. **Reconcile completed move** only repairs identity metadata when the source is absent and the known target matches. **Abandon move** clears the block without copying or deleting anything; retained copies keep distinct numeric IDs. Neither action replays HA mutations. A later move requires a new confirmation. Do not delete the sidecar to clear a pending move.
 
+## Metadata durability
+
+Server 0.2.13 requires Unix file and directory synchronization for HA sidecar saves. Each save writes the sibling temporary file, synchronizes the file, renames it over the destination, then synchronizes the parent directory. Schema migration, move intent, verified target identity, completion, and recovery all use this boundary. The next dependent HA write is admitted only after persistence succeeds. File-backed tasks, notes, and labels retain their existing atomic-replacement behavior.
+
+Keep the sidecar on a persistent local filesystem that correctly implements file and directory fsync, backed by storage that honors flush requests. Unsupported platforms and sync failures return an error rather than silently weakening the guarantee. Network/virtual filesystems or hardware that ignores flushes do not provide this guarantee; validate storage semantics before enabling HA. A relative `HA_METADATA_FILE` uses the process working directory.
+
+A failure after rename can already expose the new sidecar on disk even though directory synchronization failed. The operation still reports failure and does not advance dependent HA writes; existing pending state remains conservatively blocked in memory. Restart can find the previous or new journal transition, so inspect actual state and use explicit reconcile/abandon rather than replay. Local durability does not make HA mutations transactional or remove the external-writer races described above. Tests inject persistence errors; they do not simulate physical power loss.
+
 ## Safety and compatibility
 
 Back up `HA_METADATA_FILE` before upgrading. A matching schema 1 single-list map migrates atomically to schema 2 before reads/writes, preserving IDs, lifecycle data, and the counter. Schema 2 binds the normalized HA URL and entity-qualified keys. Old servers cannot read it: stop ntr and restore the matching pre-upgrade backup for rollback. The sidecar is not a task backup, but its pending move journal can include summaries and native descriptions; keep it private and persistent.
@@ -81,7 +90,7 @@ Existing task files are not imported, merged, or deleted. File-backed servers an
 
 HA failures return 502/503 and timeouts return 504, not client-to-ntr connection failures that activate fallback. Writes can be uncertain: HA actions, readback, and sidecar writes are not transactional. Never automatically replay them; reload actual state before deciding what to do. An ambiguous create returns an error rather than guessing its UID.
 
-One coordinator orders ntr polls and mutations. External pre-write deltas, additional readback deltas, and uncertain outcomes trigger unfiltered rescans, including for the initiating client. Only proven self-only deltas use origin filtering. HA's other writers are not locked; last-write-wins races remain possible. Client panes still require remote-update approval.
+One coordinator orders ntr polls and mutations. External pre-write deltas, additional readback deltas, and uncertain outcomes trigger unfiltered rescans, including for the initiating client. A self-only result requires both the expected task snapshot and an unchanged catalog; concurrent empty-list creation, rename, or removal cannot inherit the author's filtered origin. HA's other writers are not locked; last-write-wins races remain possible. Client panes still require remote-update approval.
 
 ## Verification
 

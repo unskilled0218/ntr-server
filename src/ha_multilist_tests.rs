@@ -1,5 +1,207 @@
 use super::*;
 
+// Each writer fails only the selected journal transition, after replacement but
+// before directory synchronization. Earlier observations still use real syncs.
+#[cfg(unix)]
+fn fail_journal_directory_sync<const PHASE: u8>(
+  path: &std::path::Path,
+  text: &str,
+) -> std::io::Result<()> {
+  let next: Sidecar = serde_json::from_str(text).unwrap();
+  let fail = match PHASE {
+    0 => next
+      .pending
+      .as_ref()
+      .is_some_and(|p| p.target_uid.is_none()),
+    1 => next
+      .pending
+      .as_ref()
+      .is_some_and(|p| p.target_uid.is_some()),
+    2 => next.pending.is_none() && next.move_sequence > 0,
+    _ => unreachable!(),
+  };
+  atomicfile::write_durable_with(path, text, |stage| {
+    if fail && stage == atomicfile::DurableStage::SyncDirectory {
+      Err(std::io::Error::other(
+        "injected journal directory sync failure",
+      ))
+    } else {
+      Ok(())
+    }
+  })
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn failed_intent_directory_sync_never_admits_copy_and_restart_can_abandon() {
+  let f = Fixture::new();
+  f.set(json!({"lists":{"todo.target":[]}})).await;
+  let (mut store, _) = f.store();
+  let entry = store
+    .mutate(Mutation::Create("task".into()), false, None)
+    .await
+    .unwrap()
+    .unwrap();
+  f.set(json!({"writes":[]})).await;
+  store.persist_metadata = fail_journal_directory_sync::<0>;
+  assert!(store
+    .mutate_routed(
+      Mutation::Update(entry.id, entry.task.to_string()),
+      move_route(&entry, "todo.target"),
+      false,
+      None
+    )
+    .await
+    .is_err());
+  assert!(f.state().await["writes"].as_array().unwrap().is_empty());
+  let (mut restarted, _) = f.store();
+  assert!(
+    restarted.metadata.pending.is_some(),
+    "post-rename intent may already exist on disk"
+  );
+  restarted.recover_move(true, true).await.unwrap();
+  assert_eq!(restarted.list().await.unwrap()[0].id, entry.id);
+  assert!(f.state().await["writes"].as_array().unwrap().is_empty());
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn failed_target_directory_sync_retains_source_and_distinct_copies_without_replay() {
+  let f = Fixture::new();
+  f.set(json!({"lists":{"todo.target":[]}})).await;
+  let (mut store, _) = f.store();
+  let entry = store
+    .mutate(Mutation::Create("task".into()), false, None)
+    .await
+    .unwrap()
+    .unwrap();
+  f.set(json!({"writes":[]})).await;
+  store.persist_metadata = fail_journal_directory_sync::<1>;
+  assert!(store
+    .mutate_routed(
+      Mutation::Update(entry.id, entry.task.to_string()),
+      move_route(&entry, "todo.target"),
+      false,
+      None
+    )
+    .await
+    .is_err());
+  let state = f.state().await;
+  assert_eq!(
+    state["writes"].as_array().unwrap().len(),
+    1,
+    "copy only; source deletion is not admitted"
+  );
+  assert_eq!(state["items"].as_array().unwrap().len(), 1);
+  assert!(
+    store
+      .metadata
+      .pending
+      .as_ref()
+      .unwrap()
+      .target_uid
+      .is_none(),
+    "memory is not advanced on failure"
+  );
+  let (mut restarted, _) = f.store();
+  assert!(restarted
+    .metadata
+    .pending
+    .as_ref()
+    .unwrap()
+    .target_uid
+    .is_some());
+  assert!(restarted
+    .mutate(Mutation::Delete(entry.id), false, None)
+    .await
+    .is_err());
+  assert!(restarted.recover_move(false, true).await.is_err());
+  restarted.recover_move(true, true).await.unwrap();
+  let entries = restarted.list().await.unwrap();
+  assert_eq!(entries.len(), 2);
+  assert_ne!(entries[0].id, entries[1].id);
+  assert!(entries.iter().any(|e| e.id == entry.id));
+  assert_eq!(f.state().await["writes"], state["writes"]);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn failed_completion_directory_sync_keeps_memory_blocked_and_restart_keeps_identity() {
+  let f = Fixture::new();
+  f.set(json!({"lists":{"todo.target":[]}})).await;
+  let (mut store, _) = f.store();
+  let entry = store
+    .mutate(Mutation::Create("task".into()), false, None)
+    .await
+    .unwrap()
+    .unwrap();
+  store.persist_metadata = fail_journal_directory_sync::<2>;
+  assert!(store
+    .mutate_routed(
+      Mutation::Update(entry.id, entry.task.to_string()),
+      move_route(&entry, "todo.target"),
+      false,
+      None
+    )
+    .await
+    .is_err());
+  let state = f.state().await;
+  assert!(state["items"].as_array().unwrap().is_empty());
+  assert!(
+    store.metadata.pending.is_some(),
+    "failed completion keeps conservative in-memory admission"
+  );
+  assert!(store.ensure_not_pending("todo.target").is_err());
+  let (mut restarted, _) = f.store();
+  assert!(
+    restarted.metadata.pending.is_none(),
+    "post-rename disk can already contain completion"
+  );
+  let moved = restarted.list().await.unwrap().remove(0);
+  assert_eq!(moved.id, entry.id);
+  assert_eq!(moved.list_id.as_deref(), Some("todo.target"));
+  assert_eq!(f.state().await["writes"], state["writes"]);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn recovery_directory_sync_failures_never_replay_and_preserve_identity_after_restart() {
+  for abandon in [true, false] {
+    let f = Fixture::new();
+    f.set(json!({"lists":{"todo.target":[]}})).await;
+    let (mut store, _) = f.store();
+    let entry = store
+      .mutate(Mutation::Create("task".into()), false, None)
+      .await
+      .unwrap()
+      .unwrap();
+    f.set(json!({"mode": if abandon { "move_fail_delete" } else { "move_delete_then_fail" }}))
+      .await;
+    assert!(store
+      .mutate_routed(
+        Mutation::Update(entry.id, entry.task.to_string()),
+        move_route(&entry, "todo.target"),
+        false,
+        None
+      )
+      .await
+      .is_err());
+    f.set(json!({"mode":""})).await;
+    let writes = f.state().await["writes"].clone();
+    store.persist_metadata = fail_journal_directory_sync::<2>;
+    assert!(store.recover_move(abandon, true).await.is_err());
+    assert!(store.metadata.pending.is_some());
+    let (mut restarted, _) = f.store();
+    assert!(restarted.metadata.pending.is_none());
+    let entries = restarted.list().await.unwrap();
+    let ids: BTreeSet<_> = entries.iter().map(|entry| entry.id).collect();
+    assert_eq!(ids.len(), entries.len());
+    assert!(entries.iter().any(|e| e.id == entry.id));
+    assert_eq!(entries.len(), if abandon { 2 } else { 1 });
+    assert_eq!(f.state().await["writes"], writes);
+  }
+}
+
 #[tokio::test]
 async fn canceled_copy_keeps_durable_intent_and_never_deletes_source_on_restart() {
   let f = Fixture::new();
@@ -175,6 +377,25 @@ async fn schema_one_migrates_atomically_without_changing_existing_ids() {
   let mut wrong = f.config.clone();
   wrong.ha_url = "https://elsewhere.test".into();
   assert!(HaStore::new(&wrong, broadcast::channel(8).0).is_err());
+}
+
+#[tokio::test]
+async fn migration_persistence_failure_preserves_schema_one_and_never_writes_to_ha() {
+  let f = Fixture::new();
+  let original = json!({"schema":1,"source":format!("{}/|todo.fixture",f.config.ha_url),
+    "next_id":2,"items":{"old":{"id":1,"creation":null,"completion":null,"legacy":null,"completed":false}}}).to_string();
+  std::fs::write(&f.config.ha_metadata_file, &original).unwrap();
+  std::fs::create_dir(f.dir.join("metadata.json.tmp")).unwrap();
+  assert!(HaStore::new(&f.config, broadcast::channel(8).0).is_err());
+  assert_eq!(
+    std::fs::read_to_string(&f.config.ha_metadata_file).unwrap(),
+    original
+  );
+  assert!(f.state().await["writes"].as_array().unwrap().is_empty());
+  std::fs::remove_dir(f.dir.join("metadata.json.tmp")).unwrap();
+  let (store, _) = f.store();
+  assert_eq!(store.metadata.schema, 2);
+  assert_eq!(store.metadata.items["todo.fixture\nold"].id, 1);
 }
 
 #[tokio::test]

@@ -10,6 +10,8 @@
 
 HA mode polls full item snapshots at `HA_POLL_SECONDS`, including edits that leave the incomplete count unchanged. One coordinator orders ntr polls and mutations. External pre-write deltas and additional/uncertain readback deltas emit unfiltered `tasks` rescans; only proven self-only changes use origin filtering. Failed readbacks do not consume the published baseline. Recovery may issue extra safe rescans. Notes retain their independent file watcher. See [HA safety](home-assistant.md#safety-and-compatibility).
 
+From server 0.2.13, self-only proof also requires an unchanged list catalog. A concurrent external empty-list rename, creation, or removal emits an unfiltered `tasks` event for the author too; the next unchanged poll stays silent. Catalog refresh updates display/routing metadata without accepting changed task content in the client.
+
 Clients may supply the same optional `X-Ntr-Client-Id` on task, raw-task, and note mutations and their SSE subscription. Successful mutations attach this advisory origin; a subscriber with the matching ID does not receive its own events. Clients without an ID retain all notifications. Missing, empty, invalid, or over-128-byte IDs have no origin. Other clients and file-watcher changes still notify normally. The ID is not authentication, authorization, or a durable revision.
 
 ## Overflow recovery

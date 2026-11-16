@@ -204,6 +204,9 @@ class Handler(BaseHTTPRequestHandler):
         target = next(i for i in state["items"] if i["uid"] == change["uid"])
         target.update(change)
       state["on_write"] = []
+      catalog_change = state.pop("catalog_on_write", None)
+      if catalog_change is not None:
+        state.update(catalog_change)
       if state["mode"] == "write_then_fail":
         state["mode"] = "fail_readback"
       if state["mode"] == "move_delete_then_fail" and action == "remove_item":
