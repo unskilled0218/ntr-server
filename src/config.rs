@@ -38,6 +38,7 @@ pub struct Config {
   pub ha_url: String,
   pub ha_token_file: PathBuf,
   pub ha_todo_entity: String,
+  pub ha_manage_lists: bool,
   pub ha_ca_file: Option<PathBuf>,
   pub ha_metadata_file: PathBuf,
   pub ha_poll_seconds: u64,
@@ -56,6 +57,7 @@ impl Default for Config {
       ha_url: String::new(),
       ha_token_file: PathBuf::new(),
       ha_todo_entity: String::new(),
+      ha_manage_lists: false,
       ha_ca_file: None,
       ha_metadata_file: PathBuf::from("ha-metadata.json"),
       ha_poll_seconds: 10,
@@ -121,6 +123,7 @@ impl Config {
         .map(PathBuf::from)
         .unwrap_or_default(),
       ha_todo_entity: text("HA_TODO_ENTITY").unwrap_or_default(),
+      ha_manage_lists: text("HA_MANAGE_LISTS").is_some_and(|v| v == "true"),
       ha_ca_file: lookup("HA_CA_FILE").map(PathBuf::from),
       ha_metadata_file: lookup("HA_METADATA_FILE")
         .map(PathBuf::from)

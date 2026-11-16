@@ -10,6 +10,9 @@ use tower::ServiceExt;
 
 static NEXT: AtomicU64 = AtomicU64::new(1);
 
+#[path = "ha_multilist_tests.rs"]
+mod multi;
+
 struct Fixture {
   child: Child,
   config: Config,
@@ -554,7 +557,7 @@ async fn capabilities_raw_safety_note_labels_and_filters_use_real_router() {
     ("GET", "/api/note", "", StatusCode::OK),
     (
       "GET",
-      "/api/tasks?project=work&context=home",
+      "/api/tasks?project=todo.fixture&context=home",
       "",
       StatusCode::OK,
     ),

@@ -48,6 +48,41 @@ struct Sidecar {
   source: String,
   next_id: u64,
   items: BTreeMap<String, Metadata>,
+  #[serde(default)]
+  pending: Option<MoveJournal>,
+  #[serde(default)]
+  move_sequence: u64,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct MoveJournal {
+  operation_id: u64,
+  source: String,
+  target: String,
+  target_uid: Option<String>,
+  before_uids: BTreeSet<String>,
+  original: Item,
+  expected: Item,
+  metadata: Metadata,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct HaList {
+  pub id: String,
+  pub name: String,
+  pub is_default: bool,
+  pub can_rename: bool,
+  pub can_delete: bool,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct Routing {
+  pub list_id: Option<String>,
+  #[serde(default)]
+  pub confirm_move: bool,
+  pub expected_source: Option<String>,
+  pub expected_raw: Option<String>,
 }
 
 #[derive(Clone, Copy)]
@@ -73,6 +108,12 @@ pub struct HaStore {
   client: Client,
   base: Url,
   entity: String,
+  default_entity: String,
+  catalog: Vec<HaList>,
+  catalog_baseline: Option<Vec<HaList>>,
+  manage_lists: bool,
+  token: String,
+  tls: std::sync::Arc<rustls::ClientConfig>,
   path: PathBuf,
   metadata: Sidecar,
   baseline: Option<BTreeMap<String, Item>>,
@@ -158,24 +199,39 @@ impl HaStore {
     let client = builder
       .build()
       .map_err(|_| invalid("Could not initialize HA HTTPS client"))?;
-    let source = format!("{}|{}", base, entity);
-    let metadata = match std::fs::read_to_string(&config.ha_metadata_file) {
+    let old_source = format!("{}|{}", base, entity);
+    let source = base.to_string();
+    let mut metadata = match std::fs::read_to_string(&config.ha_metadata_file) {
       Ok(text) => serde_json::from_str::<Sidecar>(&text).map_err(|_| metadata_error())?,
       Err(e) if e.kind() == std::io::ErrorKind::NotFound => Sidecar {
-        schema: 1,
+        schema: 2,
         source: source.clone(),
         next_id: 1,
         items: BTreeMap::new(),
+        pending: None,
+        move_sequence: 0,
       },
       Err(_) => return Err(metadata_error()),
     };
+    let migrating =
+      metadata.schema == 1 && metadata.source == old_source && metadata.pending.is_none();
+    if migrating {
+      metadata.items = metadata
+        .items
+        .into_iter()
+        .map(|(uid, m)| (item_key(&entity, &uid), m))
+        .collect();
+      metadata.schema = 2;
+      metadata.source = source.clone();
+    }
     let mut ids = BTreeSet::new();
-    if metadata.schema != 1
+    if metadata.schema != 2
+      || metadata.move_sequence > MAX_ID
       || metadata.source != source
       || metadata.next_id == 0
       || metadata.next_id > MAX_ID
       || metadata.items.iter().any(|(uid, m)| {
-        uid.is_empty()
+        split_key(uid).is_err()
           || m.id == 0
           || m.id >= metadata.next_id
           || !ids.insert(m.id)
@@ -186,16 +242,67 @@ impl HaStore {
     {
       return Err(metadata_error());
     }
-    Ok(Self {
+    let mut roots = rustls::RootCertStore::empty();
+    roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    if let Some(path) = &config.ha_ca_file {
+      let pem = std::fs::read(path).map_err(|_| invalid("Could not read HA trust roots"))?;
+      for cert in rustls_pemfile::certs(&mut std::io::Cursor::new(pem)) {
+        roots
+          .add(cert.map_err(|_| invalid("Invalid HA trust roots"))?)
+          .map_err(|_| invalid("Invalid HA trust roots"))?;
+      }
+    }
+    let tls = rustls::ClientConfig::builder()
+      .with_root_certificates(roots)
+      .with_no_client_auth();
+    let store = Self {
       client,
       base,
+      default_entity: entity.clone(),
       entity,
+      catalog: Vec::new(),
+      catalog_baseline: None,
+      manage_lists: config.ha_manage_lists,
+      token: token.trim().to_owned(),
+      tls: std::sync::Arc::new(tls),
       path: config.ha_metadata_file.clone(),
       metadata,
       baseline: None,
       continuity: false,
       tx,
-    })
+    };
+    if let Some(p) = &store.metadata.pending {
+      if p.operation_id == 0
+        || p.operation_id != store.metadata.move_sequence
+        || split_key(&p.source).is_err()
+        || !valid_entity(&p.target)
+        || p.metadata.id == 0
+        || store
+          .metadata
+          .items
+          .get(&p.source)
+          .is_none_or(|m| m.id != p.metadata.id)
+        || p.original.uid != p.source
+        || split_key(&p.source).is_ok_and(|(list, _)| list == p.target)
+        || p.before_uids.iter().any(|key| split_key(key).is_err())
+        || p.target_uid.as_ref().is_some_and(|u| {
+          split_key(u).is_err()
+            || split_key(u).is_ok_and(|(list, _)| list != p.target)
+            || p.before_uids.contains(u)
+        })
+        || p.metadata.creation.as_ref().is_some_and(|d| !date(d))
+        || p.metadata.completion.as_ref().is_some_and(|d| !date(d))
+        || p.metadata.legacy.is_some_and(|c| !c.is_ascii_uppercase())
+      {
+        return Err(metadata_error());
+      }
+    }
+    // Also persists the schema-1 migration before admitting reads or writes.
+    if migrating {
+      let text = serde_json::to_string_pretty(&store.metadata).map_err(|_| metadata_error())?;
+      atomicfile::write(&store.path, &text).map_err(|_| metadata_error())?;
+    }
+    Ok(store)
   }
 
   async fn request(&self, path: &str, data: Option<Value>) -> Result<Value, AppError> {
@@ -261,48 +368,52 @@ impl HaStore {
     result
   }
 
-  async fn fetch_inner(&self) -> Result<BTreeMap<String, Item>, AppError> {
-    self.features().await?;
-    let response = self
-      .request(
-        "api/services/todo/get_items?return_response",
-        Some(json!({"entity_id": self.entity, "status": ["needs_action", "completed"]})),
-      )
-      .await?;
-    let items: Vec<Item> =
-      serde_json::from_value(response["service_response"][&self.entity]["items"].clone())
-        .map_err(|_| upstream())?;
+  async fn fetch_inner(&mut self) -> Result<BTreeMap<String, Item>, AppError> {
+    let catalog = self.discover().await?;
     let mut snapshot = BTreeMap::new();
-    for item in items {
-      if item.uid.is_empty()
-        || item.summary.trim().is_empty()
-        || item.summary.contains(['\r', '\n'])
-        || !matches!(item.status.as_str(), "needs_action" | "completed")
-        || item
-          .summary
-          .split_whitespace()
-          .any(|t| t.starts_with("due:"))
-        || item
-          .due
-          .as_ref()
-          .is_some_and(|d| !date(d) && DateTime::parse_from_rfc3339(d).is_err())
-      {
-        return Err(upstream());
-      }
-      let probe = Task {
-        completed: item.status == "completed",
-        legacy_prefix: None,
-        completion_date: None,
-        creation_date: None,
-        description: item.summary.clone(),
-      };
-      if Task::parse(&probe.to_string()) != Some(probe) {
-        return Err(upstream());
-      }
-      if snapshot.insert(item.uid.clone(), item).is_some() {
-        return Err(upstream());
+    for list in &catalog {
+      let response = self
+        .request(
+          "api/services/todo/get_items?return_response",
+          Some(json!({"entity_id": list.id, "status": ["needs_action", "completed"]})),
+        )
+        .await?;
+      let items: Vec<Item> =
+        serde_json::from_value(response["service_response"][&list.id]["items"].clone())
+          .map_err(|_| upstream())?;
+      for mut item in items {
+        if item.uid.is_empty()
+          || item.summary.trim().is_empty()
+          || item.summary.contains(['\r', '\n'])
+          || !matches!(item.status.as_str(), "needs_action" | "completed")
+          || item
+            .summary
+            .split_whitespace()
+            .any(|t| t.starts_with("due:"))
+          || item
+            .due
+            .as_ref()
+            .is_some_and(|d| !date(d) && DateTime::parse_from_rfc3339(d).is_err())
+        {
+          return Err(upstream());
+        }
+        let probe = Task {
+          completed: item.status == "completed",
+          legacy_prefix: None,
+          completion_date: None,
+          creation_date: None,
+          description: item.summary.clone(),
+        };
+        if Task::parse(&probe.to_string()) != Some(probe) {
+          return Err(upstream());
+        }
+        item.uid = item_key(&list.id, &item.uid);
+        if snapshot.insert(item.uid.clone(), item).is_some() {
+          return Err(upstream());
+        }
       }
     }
+    self.catalog = catalog;
     Ok(snapshot)
   }
 
@@ -388,6 +499,7 @@ impl HaStore {
         }
         Entry {
           id: m.id,
+          list_id: split_key(uid).ok().map(|(entity, _)| entity.to_owned()),
           task: Task {
             completed,
             legacy_prefix: m.legacy,
@@ -414,13 +526,21 @@ impl HaStore {
   }
 
   fn publish(&mut self, snapshot: BTreeMap<String, Item>, origin: Option<String>) {
-    if self.baseline.as_ref() != Some(&snapshot) {
+    if self.baseline.as_ref() != Some(&snapshot)
+      || self.catalog_baseline.as_ref() != Some(&self.catalog)
+    {
       self.notify(origin);
     }
+    self.catalog_baseline = Some(self.catalog.clone());
     self.baseline = Some(snapshot);
   }
 
   async fn service(&self, name: &str, mut data: Value) -> Result<(), AppError> {
+    if name != "add_item" {
+      if let Some(key) = data["item"].as_str() {
+        data["item"] = json!(split_key(key)?.1);
+      }
+    }
     data["entity_id"] = json!(self.entity);
     self
       .request(&format!("api/services/todo/{name}"), Some(data))
@@ -434,9 +554,67 @@ impl HaStore {
     add_creation: bool,
     origin: Option<String>,
   ) -> Result<Option<Entry>, AppError> {
+    self
+      .mutate_routed(mutation, Routing::default(), add_creation, origin)
+      .await
+  }
+
+  pub async fn mutate_routed(
+    &mut self,
+    mutation: Mutation,
+    routing: Routing,
+    add_creation: bool,
+    origin: Option<String>,
+  ) -> Result<Option<Entry>, AppError> {
     let before = self.fetch().await?;
     let entries = self.observe(&before)?;
     self.publish(before.clone(), None);
+    let source = match &mutation {
+      Mutation::Create(_) => self.default_entity.clone(),
+      Mutation::Update(id, _)
+      | Mutation::Complete(id)
+      | Mutation::Reopen(id)
+      | Mutation::Delete(id) => entries
+        .iter()
+        .find(|e| e.id == *id)
+        .and_then(|e| e.list_id.clone())
+        .ok_or(AppError::NotFound)?,
+    };
+    let target = routing
+      .list_id
+      .as_ref()
+      .map(|s| {
+        if s.is_empty() {
+          self.default_entity.clone()
+        } else {
+          s.clone()
+        }
+      })
+      .unwrap_or(source.clone());
+    if !self.catalog.iter().any(|l| l.id == target) {
+      return Err(invalid("Unknown HA list"));
+    }
+    self.ensure_not_pending(&source)?;
+    self.ensure_not_pending(&target)?;
+    if !matches!(mutation, Mutation::Create(_)) && target != source {
+      if let Mutation::Update(id, text) = &mutation {
+        let entry = entries
+          .iter()
+          .find(|e| e.id == *id)
+          .ok_or(AppError::NotFound)?;
+        if !routing.confirm_move
+          || routing.expected_source.as_ref() != Some(&source)
+          || routing.expected_raw.as_ref() != Some(&entry.task.to_string())
+        {
+          return Err(invalid(
+            "Changing HA list requires fresh explicit move confirmation",
+          ));
+        }
+        return self.move_task(*id, text, &target, before).await.map(Some);
+      }
+      return Err(invalid("Only an explicitly confirmed edit can move a task"));
+    }
+    self.entity = target;
     let features = self.features().await?;
     if features & WRITE_FEATURES != WRITE_FEATURES {
       return Err(invalid(
@@ -588,7 +766,11 @@ impl HaStore {
     }
     if let Some(uid) = &uid {
       // HA resolves item by UID OR summary in list order. Refuse an ambiguous address.
-      if before.values().any(|i| &i.uid != uid && &i.summary == uid) {
+      if before.values().any(|i| {
+        split_key(&i.uid).ok().map(|p| p.0) == Some(self.entity.as_str())
+          && &i.uid != uid
+          && split_key(uid).is_ok_and(|(_, raw)| i.summary == raw)
+      }) {
         return Err(invalid(
           "HA item UID collides with another summary; rename that item in HA first",
         ));
@@ -646,7 +828,8 @@ impl HaStore {
       let candidates: Vec<_> = after
         .values()
         .filter(|i| {
-          !before.contains_key(&i.uid)
+          split_key(&i.uid).ok().map(|p| p.0) == Some(self.entity.as_str())
+            && !before.contains_key(&i.uid)
             && i.summary == summary
             && same_due(&i.due, &due)
             && i.status == "needs_action"
@@ -661,7 +844,12 @@ impl HaStore {
       uid.ok_or(AppError::NotFound)?
     };
     if creating && task.completed {
-      if after.values().any(|i| i.uid != uid && i.summary == uid) {
+      if after.values().any(|i| {
+        i.uid != uid
+          && split_key(&uid).is_ok_and(|(entity, raw)| {
+            split_key(&i.uid).is_ok_and(|(other, _)| other == entity) && i.summary == raw
+          })
+      }) {
         return Err(uncertain());
       }
       self
@@ -747,6 +935,29 @@ fn same_due(a: &Option<String>, b: &Option<String>) -> bool {
     _ => false,
   }
 }
+
+fn valid_entity(entity: &str) -> bool {
+  entity.starts_with("todo.")
+    && entity.len() > 5
+    && entity[5..]
+      .bytes()
+      .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'_')
+}
+
+fn item_key(entity: &str, uid: &str) -> String {
+  format!("{entity}\n{uid}")
+}
+fn split_key(key: &str) -> Result<(&str, &str), AppError> {
+  key
+    .split_once('\n')
+    .filter(|(entity, uid)| valid_entity(entity) && !uid.is_empty())
+    .ok_or_else(metadata_error)
+}
+
+#[path = "ha_lists.rs"]
+mod lists;
+#[path = "ha_moves.rs"]
+mod moves;
 
 fn snapshots_match(a: &BTreeMap<String, Item>, b: &BTreeMap<String, Item>) -> bool {
   a.len() == b.len()

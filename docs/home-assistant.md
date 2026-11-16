@@ -3,12 +3,14 @@
 - [Setup](#setup)
 - [Container deployment](#container-deployment)
 - [Task mapping](#task-mapping)
+- [Lists and projects](#lists-and-projects)
+- [Move recovery](#move-recovery)
 - [Safety and compatibility](#safety-and-compatibility)
 - [Verification](#verification)
 
 ## Setup
 
-Clients connect to ntr server, not directly to HA. Configure one existing `todo.*` entity on the server. HA Local to-do is recommended. The adapter uses HA's standard `todo.get_items`, `todo.add_item`, `todo.update_item`, and `todo.remove_item` actions; due clearing uses `due_date: null` or `due_datetime: null`. The adapter targets these APIs as documented in HA 2026.11; validate your installed version on a disposable list before deploying.
+Clients connect to ntr server, not directly to HA. Set `HA_TODO_ENTITY` to an existing default `todo.*` entity; all visible HA to-do entities become projects. HA Local To-do is recommended. The adapter uses HA's standard `todo.get_items`, `todo.add_item`, `todo.update_item`, and `todo.remove_item` actions; due clearing uses `due_date: null` or `due_datetime: null`. List management additionally uses the Local To-do config flow and entity registry. The adapter targets HA 2026.11; validate your installed version on a disposable list before deploying.
 
 Create a long-lived access token in your HA profile's Security page. Store it in `secrets/ha-token`, readable only by the server user. Put your private CA trust certificate at `certificates/homeassistant.lanCA.crt`. Neither file is committed or sent to clients. Run from the server directory:
 
@@ -23,7 +25,7 @@ cargo run --locked
 
 The example configures `TASK_BACKEND=homeassistant`, an example HTTPS URL/entity, token path `./secrets/ha-token`, CA path `./certificates/homeassistant.lanCA.crt`, metadata path `./ha-metadata.json`, and a 10-second poll interval. Replace example deployment values. Startup loads only the working directory's `.env`; existing process variables override it, so remove stale exports when switching to file configuration. Relative paths are resolved from that working directory. Restart after edits. `.env`, its local variants, and the private setup directories are Git-ignored, while `.env.example` stays tracked.
 
-`HA_CA_FILE` is optional with system-trusted certificates. For a private CA or self-signed certificate, supply its PEM trust certificate. Hostname verification remains enabled: the URL hostname must match the certificate. There is no insecure TLS option. Redirects, URL credentials, query parameters, and fragments are rejected. Individual HA requests time out after 10 seconds, keeping two-request reads below the client's 30-second deadline; response bodies are limited to 4 MiB.
+`HA_CA_FILE` is optional with publicly trusted certificates. For a private CA or self-signed certificate, supply its PEM trust certificate. Hostname verification remains enabled for HTTPS and WSS: the URL hostname must match the certificate. There is no insecure TLS option. Redirects, URL credentials, query parameters, and fragments are rejected. Individual requests/WSS commands time out after 10 seconds; HTTP bodies and WSS messages/frames are limited to 4 MiB. Multi-list operations retain the overall deadline below.
 
 `HA_POLL_SECONDS` defaults to 10 and accepts 1–3600. `TASK_BACKEND` defaults to `file`; HA mode never opens, watches, imports, or modifies `TODO_FILE`. Notes and remembered labels keep their existing configuration.
 
@@ -31,7 +33,7 @@ Client-facing HA operations wait at most 5 seconds for the coordinator and run f
 
 ## Container deployment
 
-Select a verified image containing version 0.2.11's configuration support; local code changes do not publish `latest`. Copy/edit `.env` and prepare the same `secrets/` and `certificates/` directories as above. Keep `./data` writable by container UID 1000. The token must be readable by that user; incompatible permissions fail rather than disabling authentication. The read-only mount source directories must already exist.
+Select a verified image containing version 0.2.12's multi-list support; local code changes do not publish `latest`. Copy/edit `.env` and prepare the same `secrets/` and `certificates/` directories as above. Keep `./data` writable by container UID 1000. The token must be readable by that user; incompatible permissions fail rather than disabling authentication. The read-only mount source directories must already exist.
 
 ```sh
 mkdir -p data secrets certificates
@@ -41,13 +43,13 @@ docker compose -f docker-compose.yml -f docker-compose.ha.yml up -d
 
 The opt-in `docker-compose.ha.yml` uses service `env_file: .env`; Compose's normal interpolation-only `.env` loading does not itself pass settings to a container. The override mounts host `./secrets` and `./certificates` read-only at `/data/secrets` and `/data/certificates`. With the image working directory `/data`, the same example relative token/CA paths work in the container, and `./ha-metadata.json` is persisted on the existing `./data:/data` volume. The `.env` itself is not mounted or baked into the image. Explicit service `environment` settings in another override take precedence over `env_file`; image defaults such as `HOST=0.0.0.0` remain unless overridden. The base Compose command without this HA override is unchanged.
 
-The container must resolve the HA hostname and reach its HTTPS port. Back up the metadata sidecar with notes and labels; it owns stable client IDs and ntr-only lifecycle dates. Do not share a sidecar between server processes or point it at another HA instance/list. Source mismatches and malformed identity maps fail closed. Ntr still has no authentication: keep the loopback port mapping or use an authenticating reverse proxy.
+The container must resolve the HA hostname and reach its HTTPS/WSS port. Back up the metadata sidecar with notes and labels; it owns stable client IDs, ntr-only lifecycle dates, and pending move recovery. Do not share a sidecar between server processes or point it at another HA instance. Source mismatches and malformed identity maps fail closed. Ntr still has no authentication: keep the loopback port mapping or use an authenticating reverse proxy.
 
 ## Task mapping
 
-HA owns item UID, summary, status, native due, and description. Projects, contexts, and custom tokens stay in the summary. Native due values become `due:` tokens in ntr's task DTO/raw export. HA descriptions remain untouched but are not standalone Markdown notes. Multiple lists, list creation, and automatic migration are not included.
+HA owns item UID, summary, status, native due, and description. List membership is explicit routing metadata, separate from literal `+project` summary tokens. Existing tokens stay editable and are never automatically converted to lists. Contexts and custom tokens remain in the summary. Native due values become `due:` tokens in task DTO/raw exports. Native descriptions remain untouched during edits and are preserved during moves; they are not standalone Markdown notes.
 
-Numeric IDs persist against the configured HA source/entity/UID, not summary or list position. Duplicate summaries have separate IDs. Deleted IDs are not assigned to different UIDs. If one item's UID matches another item's summary, ntr refuses that ambiguous HA service address; rename the conflicting item in HA first.
+Numeric IDs persist against the normalized HA URL, list entity ID, and item UID, not summary or position. Duplicate UIDs in different lists and duplicate summaries have separate IDs. Deleted IDs are not reused. A completed move explicitly transfers the source ID to its verified target. If one item's UID matches another item's summary in the same list, ntr refuses that ambiguous HA address; rename the conflicting item in HA first.
 
 Creation/completion dates and hidden legacy prefixes live in the sidecar. Completed items without known completion dates expose both dates as null to satisfy the current editor/raw contract. Known creation history stays private and returns on reopen. External lifecycle transitions invalidate old completion claims. Restart or a polling outage conservatively invalidates completion dates whose continuity is unknown. An external reopen/recomplete cycle entirely between reads cannot be observed; this is not an audit log.
 
@@ -55,7 +57,23 @@ The date-only editor shows a datetime's date in its supplied offset and explains
 
 Summaries that cannot round-trip through ntr's single-line task format are rejected, not flattened or reinterpreted. This includes multiline/empty summaries, leading todo.txt lifecycle/legacy-prefix syntax, and embedded `due:` tokens conflicting with native due ownership. Correct these items in HA. Unsupported entity capabilities are rejected before writes.
 
+## Lists and projects
+
+Use app 0.15.32 or later. Project selectors use entity IDs internally and friendly names for display; duplicate names show the ID. Empty lists remain visible. Unselected creates use `HA_TODO_ENTITY`; edits without explicit routing keep the current list. Task DTOs include `list_id`, and their `projects` array contains that list ID, not summary-token projects. Legacy `+project` text stays in `raw` and `description`. Raw exports/local fallback files cannot preserve native list routing or descriptions and must never be used as an HA restore/upload source.
+
+List administration is disabled by default. Set `HA_MANAGE_LISTS=true` and use an administrator-owned HA token to enable it. This extends ntr's unauthenticated API to administrative actions: enable only on a trusted connection or behind an authenticating proxy. An ordinary HA token retains supported task operations. A failed catalog read blocks routing instead of silently falling back to remembered labels. An unavailable visible HA list fails the entire task snapshot; removed entities disappear from discovery without dropping their identity tombstones.
+
+Create project creates a Local To-do list through HA's config flow. Rename changes the entity's display name through the registry; it does not rename the entity ID, storage key, or config-entry title. Delete is available only for a non-default Local To-do list whose config entry owns exactly one entity. It requires confirmation and a fresh check of active and completed tasks. Other providers cannot be deleted through ntr. HA has no atomic empty-check-and-delete: stop HA automations and other writers during deletion. Never retry an uncertain list creation/deletion automatically; inspect actual HA state first.
+
+## Move recovery
+
+Choosing another list in Edit requires a separate confirmation. ntr checks the expected source and raw task revision, journals intent, copies all task fields, identifies a unique target UID, and verifies content before deleting the source. The original numeric ID transfers only after verified completion. HA's `todo/item/move` only reorders one list and is not used. HA offers neither atomic cross-list moves nor compare-and-delete; stop other writers during moves to avoid the final verification/deletion race.
+
+Failures can leave both copies. ntr persists the journal and blocks writes to both involved lists, including after restart; an uncertain target UID never permits source deletion. Review both lists in HA. **Reconcile completed move** only repairs identity metadata when the source is absent and the known target matches. **Abandon move** clears the block without copying or deleting anything; retained copies keep distinct numeric IDs. Neither action replays HA mutations. A later move requires a new confirmation. Do not delete the sidecar to clear a pending move.
+
 ## Safety and compatibility
+
+Back up `HA_METADATA_FILE` before upgrading. A matching schema 1 single-list map migrates atomically to schema 2 before reads/writes, preserving IDs, lifecycle data, and the counter. Schema 2 binds the normalized HA URL and entity-qualified keys. Old servers cannot read it: stop ntr and restore the matching pre-upgrade backup for rollback. The sidecar is not a task backup, but its pending move journal can include summaries and native descriptions; keep it private and persistent.
 
 `GET /api/capabilities` reports `{"task_backend":"homeassistant","raw_task_replace":false}`. `GET /api/raw` exports deterministic task text; `PUT /api/raw` is rejected without upstream writes. Updated clients validate capabilities before reconnect writes and always adopt HA tasks regardless of conflict strategy. Local fallback edits are never automatically uploaded to HA. Note reconciliation keeps its existing policy.
 

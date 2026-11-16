@@ -1,6 +1,6 @@
 [package]
 name = "my-ntr-server"
-version = "0.2.11"
+version = "0.2.12"
 edition = "2021"
 
 [lib]
@@ -23,6 +23,10 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 futures-util = "0.3"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 dotenvy = "0.15"
+tokio-tungstenite = { version = "0.28", features = ["rustls-tls-webpki-roots"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+rustls-pemfile = "2"
+webpki-roots = "1"
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }

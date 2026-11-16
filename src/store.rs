@@ -18,6 +18,7 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone)]
 pub struct Entry {
   pub id: u64,
+  pub list_id: Option<String>,
   pub task: Task,
 }
 
@@ -117,7 +118,11 @@ impl Store {
 
     let id = self.next_id;
     let mut entries = self.entries.clone();
-    entries.push(Entry { id, task });
+    entries.push(Entry {
+      id,
+      list_id: None,
+      task,
+    });
     self.save(entries, self.next_id + 1)?;
     Ok(id)
   }
@@ -220,7 +225,11 @@ fn parse_entries(content: &str, start_id: u64) -> (Vec<Entry>, u64) {
   let mut next_id = start_id;
   for line in content.lines() {
     if let Some(task) = Task::parse(line) {
-      entries.push(Entry { id: next_id, task });
+      entries.push(Entry {
+        id: next_id,
+        list_id: None,
+        task,
+      });
       next_id += 1;
     }
   }

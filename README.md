@@ -5,7 +5,7 @@
 
 A single-binary Rust HTTP server for tasks and a Markdown note. Uses plain files by default, or Home Assistant To-do for tasks, and sends live updates to connected clients.
 
-Version 0.2.11 loads server settings from an optional working-directory `.env` file and adds an opt-in HA Compose override. See [configuration](docs/configuration.md), [HA setup](docs/home-assistant.md), and [release notes](docs/releases/0.2.11.md); local preparation does not mean publication.
+Version 0.2.12 supports multiple HA lists as projects, explicit task routing, confirmed moves with durable recovery, and opt-in administrative list management. See [HA setup](docs/home-assistant.md) and [release notes](docs/releases/0.2.12.md); local preparation does not mean publication.
 
 ## Quick start
 

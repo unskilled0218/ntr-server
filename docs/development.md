@@ -7,6 +7,8 @@
 
 HA adapter tests require Python 3 and OpenSSL as well as Rust. They start generated-certificate loopback HTTPS fixtures without live HA writes. Use a writable temporary directory, such as `TMPDIR=/tmp/opencode` in the agent container.
 
+The multi-list fixture implements authenticated WSS registry commands and Local To-do config flows without external Python packages. Multi-list tests cover schema migration, duplicate UIDs, default/provider/admin guards, confirmed moves, cancellation, ambiguous/lost responses, concurrent source edits, journal-save failures, restart, and metadata-only reconcile/abandon. No recovery test automatically replays an upstream copy/delete. HA's final external-writer race cannot be made transactional by the fixture; see the documented exclusive-writer requirement.
+
 Dotenv unit tests use explicit files/environment maps, and startup integration tests run the binary in isolated directories with child-only variables. Read-failure tests use a directory at `.env` rather than privilege-dependent permission bits. Run `python3 -B -m unittest discover -s tests -p 'test_env_compose.py' -v` for the HA override rendering check; it uses temporary example configuration without a daemon or container startup, and reports a skip when Compose is unavailable.
 
 Run commands from the server repository root.

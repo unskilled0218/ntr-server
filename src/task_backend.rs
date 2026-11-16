@@ -3,6 +3,7 @@
 use crate::api::{AppError, Change, Notification};
 use crate::config::Config;
 use crate::homeassistant::HaStore;
+use crate::homeassistant::Routing;
 use crate::store::{Entry, Filter, Store};
 use chrono::Local;
 use std::sync::{Arc, RwLock};
@@ -80,10 +81,11 @@ impl TaskBackend {
         .filter(|e| {
           let d = e.task.derived();
           filter.completed.is_none_or(|c| c == e.task.completed)
-            && filter
-              .project
-              .as_ref()
-              .is_none_or(|p| d.projects.contains(p))
+            && filter.project.as_ref().is_none_or(|p| {
+              e.list_id
+                .as_ref()
+                .map_or_else(|| d.projects.contains(p), |list| list == p)
+            })
             && filter
               .context
               .as_ref()
@@ -109,6 +111,19 @@ impl TaskBackend {
     tx: &broadcast::Sender<Notification>,
     origin: Option<String>,
   ) -> Result<Option<Entry>, AppError> {
+    self
+      .mutate_routed(mutation, Routing::default(), config, tx, origin)
+      .await
+  }
+
+  pub async fn mutate_routed(
+    &self,
+    mutation: Mutation,
+    routing: Routing,
+    config: &Config,
+    tx: &broadcast::Sender<Notification>,
+    origin: Option<String>,
+  ) -> Result<Option<Entry>, AppError> {
     match self {
       Self::HomeAssistant(store) => {
         let mut store = timeout(Duration::from_secs(5), store.lock())
@@ -116,7 +131,7 @@ impl TaskBackend {
           .map_err(|_| busy())?;
         match timeout(
           Duration::from_secs(20),
-          store.mutate(mutation, config.add_creation_date, origin),
+          store.mutate_routed(mutation, routing, config.add_creation_date, origin),
         )
         .await
         {
@@ -128,6 +143,11 @@ impl TaskBackend {
         }
       }
       Self::File(store) => {
+        if routing.list_id.is_some() || routing.confirm_move {
+          return Err(AppError::BadRequest(
+            "HA list routing is not supported by the file backend".into(),
+          ));
+        }
         let mut store = store.write().map_err(|_| poisoned())?;
         let today = Local::now().date_naive();
         let id = match mutation {
@@ -155,6 +175,50 @@ impl TaskBackend {
           origin,
         });
         Ok(result)
+      }
+    }
+  }
+
+  pub async fn list_operation(
+    &self,
+    action: &str,
+    id: &str,
+    name: &str,
+    confirmed: bool,
+    expected_name: &str,
+  ) -> Result<serde_json::Value, AppError> {
+    let Self::HomeAssistant(store) = self else {
+      return Err(AppError::BadRequest(
+        "This backend does not support HA lists".into(),
+      ));
+    };
+    let mut store = timeout(Duration::from_secs(5), store.lock())
+      .await
+      .map_err(|_| busy())?;
+    let operation = async {
+      match action {
+        "list" => store.lists().await,
+        "abandon" | "reconcile" => {
+          store.check_recovery(id)?;
+          store.recover_move(action == "abandon", confirmed).await
+        }
+        _ => {
+          store
+            .manage_list(action, id, name, confirmed, expected_name)
+            .await
+        }
+      }
+    };
+    match timeout(Duration::from_secs(20), operation).await {
+      Ok(result) => {
+        if result.is_err() && action != "list" {
+          store.interrupted();
+        }
+        result
+      }
+      Err(_) => {
+        store.interrupted();
+        Err(AppError::Timeout)
       }
     }
   }

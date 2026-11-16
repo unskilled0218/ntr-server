@@ -40,7 +40,8 @@ Paths are relative to the working directory, not the executable's directory. Quo
 | `TASK_BACKEND` | `file` | `file` or `homeassistant`; HA mode does not open `TODO_FILE`. |
 | `HA_URL` | None | Required HTTPS base URL in HA mode, without credentials/query/fragment. |
 | `HA_TOKEN_FILE` | None | Required server-only long-lived access-token file. |
-| `HA_TODO_ENTITY` | None | Required existing `todo.*` entity in HA mode. |
+| `HA_TODO_ENTITY` | None | Required existing default `todo.*` entity; all visible HA lists are projects. |
+| `HA_MANAGE_LISTS` | `false` | Explicit `true` enables admin-token list creation, display renaming, and empty-only deletion; secure the unauthenticated ntr API first. |
 | `HA_CA_FILE` | System trust | Optional PEM trust certificates; hostname verification stays enabled. |
 | `HA_METADATA_FILE` | `ha-metadata.json` | Persistent stable-ID/lifecycle sidecar; parent directory must be writable. |
 | `HA_POLL_SECONDS` | `10` | Full-item refresh interval, from 1 to 3600 seconds. |

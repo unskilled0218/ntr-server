@@ -125,6 +125,12 @@ pub fn router(state: AppState) -> Router {
     )
     .route("/api/tasks/{id}/complete", post(complete_task))
     .route("/api/tasks/{id}/uncomplete", post(uncomplete_task))
+    .route("/api/lists", get(get_lists).post(create_list))
+    .route(
+      "/api/lists/{id}",
+      axum::routing::put(rename_list).delete(remove_list),
+    )
+    .route("/api/list-move/recovery", post(recover_list_move))
     .route("/api/raw", get(get_raw).put(put_raw))
     .route("/api/note", get(get_note).put(put_note))
     .route("/api/labels", get(get_labels).put(put_labels))
@@ -139,6 +145,8 @@ pub fn router(state: AppState) -> Router {
 #[derive(Debug, Serialize)]
 struct TaskDto {
   id: u64,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  list_id: Option<String>,
   completed: bool,
   completion_date: Option<String>,
   creation_date: Option<String>,
@@ -154,11 +162,16 @@ impl TaskDto {
     let d = e.task.derived();
     TaskDto {
       id: e.id,
+      list_id: e.list_id.clone(),
       completed: e.task.completed,
       completion_date: e.task.completion_date.map(|x| x.to_string()),
       creation_date: e.task.creation_date.map(|x| x.to_string()),
       description: e.task.description.clone(),
-      projects: d.projects,
+      projects: e
+        .list_id
+        .as_ref()
+        .map(|list| vec![list.clone()])
+        .unwrap_or(d.projects),
       contexts: d.contexts,
       tags: d.tags,
       raw: e.task.to_string(),
@@ -170,6 +183,8 @@ impl TaskDto {
 #[derive(Debug, Deserialize)]
 struct TextRequest {
   text: String,
+  #[serde(flatten)]
+  routing: crate::homeassistant::Routing,
 }
 
 /// Query parameters for listing tasks.
@@ -237,6 +252,86 @@ async fn health() -> Json<serde_json::Value> {
   Json(json!({ "status": "ok" }))
 }
 
+#[derive(Deserialize)]
+struct ListRequest {
+  #[serde(default)]
+  name: String,
+  #[serde(default)]
+  confirmed: bool,
+  #[serde(default)]
+  expected_name: String,
+}
+
+async fn get_lists(State(state): State<AppState>) -> Result<Json<serde_json::Value>, AppError> {
+  Ok(Json(
+    state
+      .store
+      .list_operation("list", "", "", false, "")
+      .await?,
+  ))
+}
+async fn create_list(
+  State(state): State<AppState>,
+  Json(req): Json<ListRequest>,
+) -> Result<Json<serde_json::Value>, AppError> {
+  Ok(Json(
+    state
+      .store
+      .list_operation("create", "", &req.name, req.confirmed, "")
+      .await?,
+  ))
+}
+async fn rename_list(
+  State(state): State<AppState>,
+  Path(id): Path<String>,
+  Json(req): Json<ListRequest>,
+) -> Result<Json<serde_json::Value>, AppError> {
+  Ok(Json(
+    state
+      .store
+      .list_operation("rename", &id, &req.name, req.confirmed, &req.expected_name)
+      .await?,
+  ))
+}
+async fn remove_list(
+  State(state): State<AppState>,
+  Path(id): Path<String>,
+  Json(req): Json<ListRequest>,
+) -> Result<Json<serde_json::Value>, AppError> {
+  Ok(Json(
+    state
+      .store
+      .list_operation("delete", &id, "", req.confirmed, &req.expected_name)
+      .await?,
+  ))
+}
+#[derive(Deserialize)]
+struct MoveRecoveryRequest {
+  action: String,
+  confirmed: bool,
+  operation_id: u64,
+}
+async fn recover_list_move(
+  State(state): State<AppState>,
+  Json(req): Json<MoveRecoveryRequest>,
+) -> Result<Json<serde_json::Value>, AppError> {
+  if !matches!(req.action.as_str(), "abandon" | "reconcile") {
+    return Err(AppError::BadRequest("Unknown move recovery action".into()));
+  }
+  Ok(Json(
+    state
+      .store
+      .list_operation(
+        &req.action,
+        &req.operation_id.to_string(),
+        "",
+        req.confirmed,
+        "",
+      )
+      .await?,
+  ))
+}
+
 async fn capabilities(State(state): State<AppState>) -> Json<serde_json::Value> {
   Json(
     json!({ "task_backend": if state.store.is_ha() { "homeassistant" } else { "file" }, "raw_task_replace": !state.store.is_ha() }),
@@ -279,8 +374,9 @@ async fn create_task(
 ) -> Result<(StatusCode, Json<TaskDto>), AppError> {
   let entry = state
     .store
-    .mutate(
+    .mutate_routed(
       Mutation::Create(req.text),
+      req.routing,
       &state.config,
       &state.tx,
       client_id(&headers),
@@ -307,8 +403,9 @@ async fn update_task(
 ) -> Result<Json<TaskDto>, AppError> {
   let entry = state
     .store
-    .mutate(
+    .mutate_routed(
       Mutation::Update(id, req.text),
+      req.routing,
       &state.config,
       &state.tx,
       client_id(&headers),
