@@ -1,3 +1,9 @@
-# Note (Note.md)
+# Markdown note
 
-Alongside the task file the server keeps a single free-form Markdown note in `NOTE_FILE` (default `Note.md`). It is userless and unstructured — one block of text, the scratchpad counterpart to the structured todo.txt — stored in its own file, cached in memory, and written atomically (temp file + rename) just like the task store, so the file and memory never diverge. A missing file is treated as an empty note. There is no per-task note and no versioning; `PUT /api/note` is last-write-wins, the same as `PUT /api/raw` for the task file — a plain overwrite.
+- [Storage and API](#storage-and-api)
+
+## Storage and API
+
+The server keeps one independent Markdown note in `NOTE_FILE` (default `Note.md`). A missing file reads as empty. `GET /api/note` reads it; `PUT /api/note` replaces it using atomic file replacement.
+
+There are no per-task notes or revision history. Saves are last-write-wins, not transactional conflict protection. [Client approval](../../app/docs/live-sync.md) protects observed drafts but cannot recover overwritten versions.

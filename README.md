@@ -3,37 +3,18 @@
 - [Quick start](#quick-start)
 - [Documentation](#documentation)
 
-A single-binary Rust HTTP server for tasks and a Markdown note. Uses plain files by default, or Home Assistant To-do for tasks, and sends live updates to connected clients.
+A Rust HTTP server for tasks, Markdown notes, and live change notifications. Tasks can use local storage or Home Assistant.
 
-Version 0.2.14 refreshes Rust dependencies, including HTTP middleware, reqwest, and the WSS transport. HA HTTPS/WSS retain shared explicit CA roots, hostname verification, bounded operations, and durable recovery. See [HA durability requirements](docs/home-assistant.md#metadata-durability) and [release notes](docs/releases/0.2.14.md); local preparation does not mean publication.
+Version 0.2.15. See [release notes](docs/releases/0.2.15.md).
 
 ## Quick start
 
-```sh
-cargo run
-```
+From this directory, run `cargo run --locked`. For HA, first prepare [connection settings](docs/home-assistant.md#setup). For Docker, use the single [Compose file](docs/docker-compose.md).
 
-For Home Assistant tasks, copy `.env.example` to `.env`, edit it, and provide the token/certificate files described in [HA setup](docs/home-assistant.md#setup). Existing process variables override `.env`. Real `.env` files and private setup directories are Git-ignored.
-
-Docker uses one `docker-compose.yml` for both backends. Prepare `.env`, `data/`, `secrets/`, and `certificates/`, then run `docker compose up -d`; see [Compose setup](docs/docker-compose.md).
-
-In another terminal:
-
-```sh
-curl http://127.0.0.1:8080/api/tasks
-```
-
-The server listens on `127.0.0.1:8080` by default and has no authentication. Keep it on loopback or use an authenticating reverse proxy.
+The server defaults to `http://127.0.0.1:8080` and has no authentication. Keep it on loopback or behind an authenticating reverse proxy.
 
 ## Documentation
 
-- [Run and configuration](docs/configuration.md)
-- [Home Assistant task backend](docs/home-assistant.md) — server-only credentials, private-CA trust, and safe reconnect behavior; Markdown notes remain unchanged.
-- [Docker Compose](docs/docker-compose.md)
-- [Container image releases](docs/image-release.md)
-- [HTTP API](docs/api.md)
-- [Task IDs](docs/task-ids.md)
-- [todo.txt support](docs/todo-txt.md)
-- [Markdown note](docs/note.md)
-- [Live updates](docs/live-updates.md)
-- [Development and testing](docs/development.md)
+- [Configuration](docs/configuration.md), [HA lists and recovery](docs/home-assistant.md), and [Docker Compose](docs/docker-compose.md).
+- [HTTP API](docs/api.md), [task IDs](docs/task-ids.md), [notes](docs/note.md), and [live updates](docs/live-updates.md).
+- [Development](docs/development.md) and [container publication](docs/image-release.md).

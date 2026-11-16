@@ -7,56 +7,38 @@
 - [Retries and recovery](#retries-and-recovery)
 - [Package association](#package-association)
 
-Run commands from the server repository root. The publisher creates real remote changes. Do not run it without separate approval.
-
 ## Configuration
 
-`scripts/release.json` selects the server repository, image, username, token file, notes, and both `linux/amd64` and `linux/arm64` platforms. Keep URLs free of credentials and use normal HTTPS trust.
+From the server directory, review `scripts/release.json` for repository/image, username, protected token-file path, notes, and ordered `linux/amd64`, `linux/arm64` targets. `VERSION` is canonical; Cargo/README mirrors, notes link, and configured notes must match. Notes start with `# Release v<version>`.
 
-`VERSION` is canonical. Cargo files, the README version and notes link, and the configured release notes must match. Notes start with `# Release v<version>` and become the release body. The release tag binds the source commit, settings, scripts, notes, and image digest. A later source change cannot claim an existing release identity.
+The tag binds source, configuration/scripts/notes, and the image digest. Changed inputs cannot claim an existing release identity.
 
 ## Credentials and tools
 
-Use a user-owned, readable, non-symlink token file outside the repository, mode `0600` or `0400`. The default is `~/.config/token/git`. `GIT_TOKEN` overrides the file path, not the token value. `GIT_USERNAME` overrides the configured login; use the token owner's account.
+Use the configured token file or `GIT_TOKEN` path override, not a token value. It must be user-owned, readable, regular, non-symlink, mode `0600` or `0400`. `GIT_USERNAME` may select the token owner's login. Keep credentials out of Git, `.env`, arguments, and shell history; Git authentication is separate.
 
-Never put tokens in Git, `.env`, command arguments, or shell history. Publication requires repository and package permissions, release creation rights, and separate Git authentication.
-
-Install Bash, Python 3.11+, Git, curl, Docker, and Buildx. Prepare a selected builder supporting both platforms and trusted Git, curl, Docker, and BuildKit connections. The publisher does not install tools, prepare builders, or disable TLS. Unsupported environment overrides are refused.
+Publication needs Bash, Python 3.11+, Git, curl, Docker/Buildx, a selected two-platform builder, repository/package/release permissions, and trusted HTTPS/tool configuration. The script does not install tools, prepare builders, or disable TLS.
 
 ## Local checks
 
 ```sh
-python3 -B -m unittest discover -s tests -p 'test*.py' -v
-bash -n scripts/release.sh
-bash -n scripts/release-common.sh
 ./scripts/release.sh --validate
-cargo test --locked
-cargo clippy --all-targets --locked
-cargo fmt --check
-docker compose config
-git diff --check
 ```
 
-`--help` displays usage. `--validate` checks local configuration and version mirrors without credentials, Docker, or network access. It does not verify live permissions or publish anything. The Python tests use temporary data and fake services; they do not certify live APIs or Docker routing. Record unavailable tools and device checks.
+Also run [development checks](development.md). Validation is offline and needs no credentials or Docker; fixture tests do not certify live permissions/APIs. Report unavailable tools honestly.
 
 ## Publication
 
-After separate approval, use a clean, already-pushed server `main`. Verify the configured repository and image, exactly one fetch and push destination, credentials, and the prepared builder. Exclude other release, package, and association writers until completion; the local lock does not protect other checkouts. The publisher does not push source.
+After separate approval, use clean, already-pushed `main`, exact configured destinations, and exclusive release/package/association writers across machines. The local lock is not distributed. Run `./scripts/release.sh` only when ready for real writes.
 
-```sh
-./scripts/release.sh
-```
-
-The script verifies the two-platform image and immutable digest, pushes the annotated version tag without force, promotes the digest to `latest`, creates the notes-only release, and checks package association. Existing tags, releases, and packages are not deleted. The Git tag push does not follow unrelated tags.
+The script verifies both platforms/digest, pushes only the annotated version tag without force, promotes `latest`, creates a notes-only release, and checks package association. It never pushes source or deletes accepted objects. Curated stderr phases/waiting updates hide raw tool output and credentials.
 
 ## Retries and recovery
 
-A completed release is reverified against its bound identity and `latest`. Changed source, settings, scripts, notes, or conflicting evidence cause refusal rather than automatic repair. A tag-only or release-only state is ambiguous and stops publication; inspect the evidence and obtain separate approval before any manual action.
+Completed releases are reverified against bound identity and `latest`. Partial/conflicting/changed evidence stops rather than repairs. A lost response may follow an accepted write: inspect actual state before separately approved recovery. Do not delete records, force-push tags, roll back aliases, or retry blindly.
 
-A failed or lost response may leave accepted remote changes. Do not delete records, force-push tags, roll back aliases, or blindly repeat writes. For an older verified publication's missing package association, use the separately approved [pinned recovery procedure](package-association-recovery.md); it does not republish the image.
+For an older accepted publication's missing association, use [pinned recovery](package-association-recovery.md), not republishing with changed tools.
 
 ## Package association
 
-Association applies to every version of the package. An existing correct link requires no write; conflicting or ambiguous evidence is refused. A new link is permitted only on reviewed server versions and requires exclusive writers and exact verification. See the [package association contract](package-association-contract.md).
-
-Failures can leave a verified publication awaiting association. Local tests do not establish account permissions, deployed API behavior, or UI rendering.
+Association affects every version of a package. Correct links verify read-only; conflicts/ambiguity refuse. A new link needs reviewed server behavior, exclusive writers, and exact readback. See the [contract](package-association-contract.md). Publication may already be complete when association fails; no automatic rollback follows.

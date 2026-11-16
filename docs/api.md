@@ -7,7 +7,7 @@
 
 ## Task responses
 
-All task responses use this JSON shape:
+Tasks include `id`, completion/creation dates, `description`, `projects`, `contexts`, `tags`, and `raw`. For example:
 
 ```json
 {
@@ -15,56 +15,50 @@ All task responses use this JSON shape:
   "completed": false,
   "completion_date": null,
   "creation_date": "2026-06-19",
-  "description": "buy milk +groceries @store due:2026-06-30",
-  "projects": ["groceries"],
-  "contexts": ["store"],
-  "tags": { "due": "2026-06-30" },
-  "raw": "(A) 2026-06-19 buy milk +groceries @store due:2026-06-30"
+  "description": "buy milk",
+  "projects": [],
+  "contexts": [],
+  "tags": {},
+  "raw": "2026-06-19 buy milk"
 }
 ```
 
+HA tasks also include `list_id`, and `projects` becomes `[list_id]`. Treat `raw` as a validated task projection, not a complete HA backup. See [ID lifetime](task-ids.md).
+
 ## Routes
 
-| Method & path | Description |
+| Method & path | Purpose |
 | --- | --- |
-| `GET /api/health` | Liveness check. |
-| `GET /api/capabilities` | Non-secret `task_backend` (`file`/`homeassistant`) and `raw_task_replace` boolean. |
-| `GET /api/tasks` | List tasks. Filters: `completed`, `project`, `context`. |
-| `POST /api/tasks` | Create from `{ "text": "<todo.txt line>" }`. |
+| `GET /api/health` | Process liveness, not upstream health. |
+| `GET /api/capabilities` | `task_backend` (`file`/`homeassistant`) and `raw_task_replace`. |
+| `GET /api/tasks` | List; optional `completed`, `project`, `context` filters. |
+| `POST /api/tasks` | Create from `{ "text": "buy milk" }`. |
 | `GET /api/tasks/{id}` | Fetch one task. |
-| `PUT /api/tasks/{id}` | Replace from `{ "text": "<todo.txt line>" }`. |
-| `POST /api/tasks/{id}/complete` | Mark complete. |
-| `POST /api/tasks/{id}/uncomplete` | Mark incomplete. |
-| `DELETE /api/tasks/{id}` | Delete (204 on success). |
-| `GET /api/raw` | Whole file as `text/plain`. |
-| `PUT /api/raw` | Replace the whole file from a `text/plain` body. |
-| `GET /api/note` | The Markdown note as `text/markdown`. |
-| `PUT /api/note` | Replace the note from a text body (`204`). |
-| `GET /api/labels` | Remembered projects and contexts as JSON. |
-| `PUT /api/labels` | Replace the remembered labels document (`204`). |
-| `GET /api/events` | Server-Sent Events stream of `change` events (`tasks` / `note`) for live updates. |
-| `GET /api/lists` | HA catalog: `lists` with `id`, `name`, `is_default`, `can_rename`, `can_delete`; global `can_create` and nullable `pending_move` diagnostics. |
-| `POST /api/lists` | Create Local To-do list with `{ "name": "Shared", "confirmed": true }`; admin opt-in required. |
-| `PUT /api/lists/{entity_id}` | Rename display with `{ "name": "New", "expected_name": "Old", "confirmed": true }`. |
-| `DELETE /api/lists/{entity_id}` | Delete verified empty Local To-do list with `{ "expected_name": "Old", "confirmed": true }`; default protected. |
-| `POST /api/list-move/recovery` | Explicit metadata-only `{ "action": "reconcile" or "abandon", "operation_id": 1, "confirmed": true }`; requires the current journal ID and never replays HA writes. |
-
-See [Task IDs](task-ids.md) for ID lifetime and [Live updates](live-updates.md) for event behavior.
+| `PUT /api/tasks/{id}` | Replace from a `text` request. |
+| `POST /api/tasks/{id}/complete` | Complete. |
+| `POST /api/tasks/{id}/uncomplete` | Reopen. |
+| `DELETE /api/tasks/{id}` | Delete; success is 204. |
+| `GET /api/raw` | Task projection as `text/plain`. |
+| `PUT /api/raw` | Bulk task replacement for supported backends; rejected in HA mode. |
+| `GET /api/note` / `PUT /api/note` | Read/replace the Markdown note; successful PUT is 204. |
+| `GET /api/labels` / `PUT /api/labels` | Read/replace remembered labels; successful PUT is 204. |
+| `GET /api/events` | SSE `change` events with `tasks` / `note` payloads. |
+| `GET /api/lists` | HA catalog and pending-move diagnostics. |
+| `POST /api/lists` | Create with `{ "name": "Shared", "confirmed": true }`. |
+| `PUT /api/lists/{entity_id}` | Rename with `name`, `expected_name`, and `confirmed: true`. |
+| `DELETE /api/lists/{entity_id}` | Delete with `expected_name` and `confirmed: true`; default/nonempty lists are protected. |
+| `POST /api/list-move/recovery` | `{ "action": "reconcile", "operation_id": 1, "confirmed": true }`; action may also be `abandon`. |
 
 ## HA list routing
 
-In HA mode, task DTOs also contain `list_id`; `projects` is `[list_id]`. Description/raw keep literal `+tokens` unchanged. `project` filtering uses the list entity ID. Create/update bodies accept optional `list_id`: omission creates in the default or preserves the update's source; an empty value selects the configured default. Different-list updates additionally require `confirm_move: true`, `expected_source` equal to the current entity ID, and `expected_raw` equal to the fresh raw projection. Token-only changes never imply moves. File-backed servers reject explicit HA routing and list operations; their DTOs omit `list_id`.
+Create/update accept optional `list_id`: omission uses the default for creates or preserves the update's source; empty selects the default. A changed list additionally requires `confirm_move: true`, current `expected_source`, and fresh `expected_raw`. Summary-label edits never imply moves. The `project` filter uses the list ID. Other backends reject explicit HA routing/list operations.
 
-List mutation responses return the refreshed catalog. Pending diagnostics expose only the monotonic `operation_id`, `task_id`, source/target list IDs, and whether the target copy was identified, never credentials or private registry/config-entry payloads. Recovery must echo the current operation ID so a stale confirmation cannot clear a newer move. Only one move journal can be pending at a time. While pending, both involved lists reject ordinary writes. See [management and recovery](home-assistant.md#lists-and-projects) for non-atomic HA limits and required exclusive writer access.
+Catalog entries expose `id`, `name`, `is_default`, `can_rename`, and `can_delete`; the response adds `can_create` and nullable `pending_move`. Diagnostics expose operation/task/source/target IDs and whether the copy is identified, never private registry data. Echo the current operation ID during recovery; stale confirmations fail. Pending moves block both participant lists. See [management/recovery requirements](home-assistant.md#lists-and-projects).
 
 ## Safety
 
-`/api/raw` exports task text without list/native-description restore fidelity; replacing it in HA mode returns 400 before writes. Unknown external completion dates project both lifecycle dates as null without erasing private creation history. Native due values can be dates or offset-bearing datetimes. See [HA mapping](home-assistant.md).
+ntr has no authentication. HA list administration needs server opt-in plus admin rights. HA failures use 502/503, timeouts 504, and uncertain writes 409 or 504. A failure can follow a committed write: inspect actual state instead of replaying. Errors omit credentials/upstream bodies. Unknown completion history stays unknown; due values may be dates or offset-bearing datetimes.
 
-HA failures use 502/503, timeouts use 504, and uncertain writes use 409 (or 504 for timed-out actions). Upstream writes can commit before readback/metadata failure; reload before another mutation instead of replaying automatically. Error responses omit tokens and upstream bodies. `/api/health` attests process liveness, not HA availability.
+Task/raw/note mutations and SSE may share advisory `X-Ntr-Client-Id`; it filters only proven own notifications, not authentication or external changes. Overflow and watcher rescans bypass filtering. See [events](live-updates.md).
 
-Task, raw-task, and note mutations accept an optional `X-Ntr-Client-Id` header. Supplying the same ID to `GET /api/events` filters only that subscriber's own mutation notifications. The header is advisory, not authentication. Watcher events and lag-triggered `tasks` / `note` rescans bypass origin filtering. Existing event names and string payloads remain compatible; updated clients detect and ask before applying changes.
-
-Priority is absent from task DTOs and stores. Any `priority` query parameter returns HTTP 400 with `{ "error": "Priority filtering is no longer supported" }`, including a bare key, empty, invalid, repeated, or URL-encoded key. Supported filters keep their existing validation. Older clients relying on priority are unsupported.
-
-`raw` preserves hidden leading legacy tokens; `description` excludes only that leading token and lifecycle dates. `pri:` tokens remain visible, editable description text. Complete/reopen never convert these tokens. New clients must validate raw completion state, dates, and description before reconstructing a hidden token during editing. See [todo.txt support and mixed-version limits](todo-txt.md).
+Removed `priority` filters return HTTP 400 rather than being ignored. Edit clients must validate `raw` against completion/dates/description before reconstructing a task; inconsistent data fails without a write. Keep client/server versions aligned when exact preservation matters.
