@@ -5,6 +5,6 @@
   "image": "git.lan/ntr/ntr-server",
   "username": "dev",
   "token_file": "~/.config/git/token",
-  "notes": "docs/releases/0.2.13.md",
+  "notes": "docs/releases/0.2.14.md",
   "platforms": ["linux/amd64", "linux/arm64"]
 }

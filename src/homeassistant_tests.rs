@@ -55,10 +55,20 @@ impl Fixture {
       labels_file: dir.join("labels.json"),
       ..Config::default()
     };
+    let mut roots = rustls::RootCertStore::empty();
+    let pem = std::fs::read(dir.join("ca.pem")).unwrap();
+    for cert in rustls_pemfile::certs(&mut std::io::Cursor::new(pem)) {
+      roots.add(cert.unwrap()).unwrap();
+    }
+    let tls = rustls::ClientConfig::builder_with_provider(std::sync::Arc::new(
+      rustls::crypto::ring::default_provider(),
+    ))
+    .with_safe_default_protocol_versions()
+    .unwrap()
+    .with_root_certificates(roots)
+    .with_no_client_auth();
     let client = Client::builder()
-      .add_root_certificate(
-        reqwest::Certificate::from_pem(&std::fs::read(dir.join("ca.pem")).unwrap()).unwrap(),
-      )
+      .tls_backend_preconfigured(tls)
       .build()
       .unwrap();
     Self {
@@ -577,9 +587,7 @@ async fn timeout_after_write_is_uncertain_and_recovery_notifies_without_replay()
   let f = Fixture::new();
   let (mut store, mut rx) = f.store();
   store.client = Client::builder()
-    .add_root_certificate(
-      reqwest::Certificate::from_pem(&std::fs::read(f.dir.join("ca.pem")).unwrap()).unwrap(),
-    )
+    .tls_backend_preconfigured((*store.tls).clone())
     .default_headers({
       let mut h = header::HeaderMap::new();
       h.insert(

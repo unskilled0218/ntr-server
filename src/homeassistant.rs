@@ -181,22 +181,37 @@ impl HaStore {
     let mut headers = header::HeaderMap::new();
     headers.insert(header::AUTHORIZATION, authorization);
     // A read uses two HA requests; keep their combined deadline below the client's 30s.
-    let mut builder = Client::builder()
-      .default_headers(headers)
-      .redirect(reqwest::redirect::Policy::none())
-      .timeout(Duration::from_secs(10));
+    let mut roots = rustls::RootCertStore::empty();
+    roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
     if let Some(path) = &config.ha_ca_file {
       let pem = std::fs::read(path)
         .map_err(|_| invalid("HA_CA_FILE must be a readable PEM certificate"))?;
-      let certificates = reqwest::Certificate::from_pem_bundle(&pem)
+      let certificates = rustls_pemfile::certs(&mut std::io::Cursor::new(pem))
+        .collect::<Result<Vec<_>, _>>()
         .map_err(|_| invalid("HA_CA_FILE contains invalid PEM certificates"))?;
       if certificates.is_empty() {
         return Err(invalid("HA_CA_FILE contains no certificates"));
       }
       for certificate in certificates {
-        builder = builder.add_root_certificate(certificate);
+        roots
+          .add(certificate)
+          .map_err(|_| invalid("Invalid HA trust roots"))?;
       }
     }
+    // Share explicit web-PKI/custom roots and the ring provider across HTTPS/WSS;
+    // reqwest's platform-verifier defaults must not change the HA trust policy.
+    let tls = rustls::ClientConfig::builder_with_provider(std::sync::Arc::new(
+      rustls::crypto::ring::default_provider(),
+    ))
+    .with_safe_default_protocol_versions()
+    .map_err(|_| invalid("Could not initialize HA TLS protocols"))?
+    .with_root_certificates(roots)
+    .with_no_client_auth();
+    let builder = Client::builder()
+      .default_headers(headers)
+      .redirect(reqwest::redirect::Policy::none())
+      .tls_backend_preconfigured(tls.clone())
+      .timeout(Duration::from_secs(10));
     let client = builder
       .build()
       .map_err(|_| invalid("Could not initialize HA HTTPS client"))?;
@@ -243,19 +258,6 @@ impl HaStore {
     {
       return Err(metadata_error());
     }
-    let mut roots = rustls::RootCertStore::empty();
-    roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-    if let Some(path) = &config.ha_ca_file {
-      let pem = std::fs::read(path).map_err(|_| invalid("Could not read HA trust roots"))?;
-      for cert in rustls_pemfile::certs(&mut std::io::Cursor::new(pem)) {
-        roots
-          .add(cert.map_err(|_| invalid("Invalid HA trust roots"))?)
-          .map_err(|_| invalid("Invalid HA trust roots"))?;
-      }
-    }
-    let tls = rustls::ClientConfig::builder()
-      .with_root_certificates(roots)
-      .with_no_client_auth();
     let store = Self {
       client,
       base,

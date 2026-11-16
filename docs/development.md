@@ -1,6 +1,7 @@
 # Development
 
 - [Application checks](#application-checks)
+- [Dependency updates](#dependency-updates)
 - [Release tooling](#release-tooling)
 
 ## Application checks
@@ -20,6 +21,12 @@ cargo test     # unit + integration tests
 cargo fmt      # 2-space indent (see rustfmt.toml)
 cargo clippy --all-targets
 ```
+
+## Dependency updates
+
+The 0.2.14 refresh uses tower-http 0.7, reqwest 0.13, tokio-tungstenite 0.30, and current compatible locked crates; validation uses Rust 1.100.0. The HA client selects the ring crypto provider explicitly and shares web-PKI/custom CA roots between HTTPS and WSS rather than inheriting changed reqwest TLS defaults. Keep redirect rejection, hostname checks, bounded operations, provenance, and journal-failure tests intact when upgrading transport dependencies.
+
+Use `cargo update` deliberately, then `cargo test --locked`, `cargo fmt --check`, strict Clippy, Compose rendering, and the sibling app's HA serializer contract. Run `cargo audit` separately when installed; successful dependency resolution/builds do not establish absence of Rust vulnerabilities. Do not claim cross-platform or live-HA validation from the disposable Linux fixture.
 
 ## Release tooling
 
