@@ -12,7 +12,7 @@ Run commands from the server repository root. Compose selects `git.lan/ntr/ntr-s
 If the package is private, authenticate with a Forgejo username and token allowed to read it. Public packages may be pulled without login:
 
 ```bash
-docker login git.lan --username your-login --password-stdin < "$HOME/.config/git/token"
+docker login git.lan --username your-login --password-stdin < "$HOME/.config/token/git"
 ```
 
 Ensure the data directory exists before starting and is writable by the container's fixed UID/GID `1000:1000`. The server's atomic writes need directory access, not merely write access to an existing file. Resolve incompatible permissions with the data owner before deployment; Compose does not change host file ownership:

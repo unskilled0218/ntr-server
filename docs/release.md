@@ -17,7 +17,7 @@ Run commands from the server repository root. The publisher creates real remote 
 
 ## Credentials and tools
 
-Use a user-owned, readable, non-symlink token file outside the repository, mode `0600` or `0400`. The default is `~/.config/git/token`. `GIT_TOKEN` overrides the file path, not the token value. `GIT_USERNAME` overrides the configured login; use the token owner's account.
+Use a user-owned, readable, non-symlink token file outside the repository, mode `0600` or `0400`. The default is `~/.config/token/git`. `GIT_TOKEN` overrides the file path, not the token value. `GIT_USERNAME` overrides the configured login; use the token owner's account.
 
 Never put tokens in Git, `.env`, command arguments, or shell history. Publication requires repository and package permissions, release creation rights, and separate Git authentication.
 

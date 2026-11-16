@@ -4,7 +4,7 @@
   "repository": "ntr/ntr-server",
   "image": "git.lan/ntr/ntr-server",
   "username": "dev",
-  "token_file": "~/.config/git/token",
+  "token_file": "~/.config/token/git",
   "notes": "docs/releases/0.2.14.md",
   "platforms": ["linux/amd64", "linux/arm64"]
 }
